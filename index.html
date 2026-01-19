@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>10円ゲーム & ミニゲーム集</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100vh;
+    }
+
+    h1, h2, h3 {
+      text-align: center;
+    }
+
+    button {
+      cursor: pointer;
+      border: none;
+      padding: 10px 20px;
+      margin: 8px;
+      font-size: 16px;
+      border-radius: 6px;
+      background: #caa55a;
+      color: #222;
+      box-shadow: 0 3px 0 #7b6432;
+      transition: transform 0.05s ease, box-shadow 0.05s ease, filter 0.1s;
+    }
+
+    button:active {
+      transform: translateY(2px);
+      box-shadow: 0 1px 0 #7b6432;
+      filter: brightness(0.9);
+    }
+
+    button[disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+
+    .screen {
+      display: none;
+      width: 100%;
+      max-width: 480px;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+
+    .screen.active {
+      display: block;
+    }
+
+    .panel {
+      background: #222;
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: 0 0 0 2px #555;
+      margin-top: 16px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      margin: 8px 0;
+      border-radius: 4px;
+      border: 1px solid #666;
+      box-sizing: border-box;
+      background: #111;
+      color: #eee;
+    }
+
+    .center {
+      text-align: center;
+    }
+
+    .status-bar {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .small {
+      font-size: 12px;
+      opacity: 0.8;
+    }
+
+    /* 10円ゲーム用 */
+    #gameContainer {
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+      margin: 0 auto;
+      background: #000;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 4px solid #5a4120;
+      box-shadow: 0 0 20px rgba(0,0,0,0.7);
+    }
+
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #222; /* 背景画像を貼るまでは無地 */
+    }
+
+    #leverContainer {
+      margin-top: 8px;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+    }
+
+    .lever-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex: 1;
+    }
+
+    input[type="range"] {
+      width: 90%;
+    }
+
+    .top-right-menu {
+      position: fixed;
+      top: 8px;
+      right: 8px;
+      z-index: 100;
+    }
+
+    .msg {
+      margin-top: 6px;
+      font-size: 13px;
+      min-height: 1.4em;
+    }
+
+    .menu-title {
+      font-size: 20px;
+      letter-spacing: 0.1em;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="top-right-menu">
+  <button id="backToMenuBtn" style="font-size:12px; padding:6px 10px;">メニューへ</button>
+</div>
+
+<!-- 0. 入口メニュー -->
+<div id="screen-menu" class="screen active">
+  <div class="panel">
+    <h1 class="menu-title">���ニゲーム選択</h1>
+    <div class="center">
+      <button id="toNameInputBtn">10円ゲーム</button><br>
+      <button id="toJankenBtn">じゃんけんゲーム</button>
+    </div>
+  </div>
+</div>
+
+<!-- 1. 名前入力画面 -->
+<div id="screen-name" class="screen">
+  <div class="panel">
+    <h2>名前を入力してください</h2>
+    <input type="text" id="playerNameInput" placeholder="未入力なら『Player』になります">
+    <div class="center">
+      <button id="decideNameBtn">決定</button>
+    </div>
+  </div>
+</div>
+
+<!-- 2. 10円ゲーム画面 -->
+<div id="screen-10yen" class="screen">
+  <div class="panel">
+    <div class="status-bar">
+      <div>PLAYING：<span id="playingName">-</span></div>
+      <div>WAITING：<span id="waitingNames">0人</span></div>
+    </div>
+    <div class="small" id="stateLabel">状態：接続中...</div>
+
+    <div id="gameContainer">
+      <!-- 背景用PNGを貼る場合はCSS背景、もしくはcanvas描画で対応 -->
+      <!-- 例: background-image: url('https://raw.githubusercontent.com/yumemiru28000/zzHBD1/main/map.png'); -->
+      <canvas id="gameCanvas" width="360" height="480"></canvas>
+    </div>
+
+    <div class="center" style="margin-top:8px;">
+      <button id="insertCoinBtn">10円を入れる</button>
+      <button id="waitBtn">待機する</button>
+      <button id="endGameBtn">ゲームを終わる</button>
+    </div>
+
+    <div id="leverContainer">
+      <div class="lever-group">
+        <span class="small">傾き（左／右）</span>
+        <input type="range" id="tiltRange" min="-30" max="30" step="1" value="0">
+      </div>
+      <div class="lever-group">
+        <span class="small">発射レバー</span>
+        <input type="range" id="shootRange" min="0" max="100" step="1" value="0">
+      </div>
+    </div>
+
+    <div class="msg" id="infoMsg"></div>
+    <div class="small">
+      ・誰もいない時：今なら遊べます<br>
+      ・PLAYING：○○が挑戦中（観戦のみ）<br>
+      ・待機：次に遊びたい人：n人
+    </div>
+  </div>
+</div>
+
+<!-- 3. じゃんけんゲーム画面（仮。あとで janken.html に分離予定） -->
+<div id="screen-janken" class="screen">
+  <div class="panel">
+    <h2>じゃんけんゲーム（仮）</h2>
+    <p class="small">ここは後で janken.html に分離予定。いったんダミー実装。</p>
+    <div class="center">
+      <button id="jankenDummyBtn">じゃんけん！（仮）</button>
+      <div id="jankenResult" class="msg"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Firebase & アプリ本体 -->
+<script type="module">
+  // ==========================
+  // Firebase 初期化
+  // ==========================
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-analytics.js";
+  import {
+    getDatabase,
+    ref,
+    onValue,
+    set,
+    update,
+    push,
+    serverTimestamp,
+    remove
+  } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCC7KAv7V4j1Z6-o1Y8ikmb3r5htN9O_aA",
+    authDomain: "zzgohan-280.firebaseapp.com",
+    databaseURL: "https://zzgohan-280-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "zzgohan-280",
+    storageBucket: "zzgohan-280.firebasestorage.app",
+    messagingSenderId: "459336048542",
+    appId: "1:459336048542:web:ff6c825dec81cc7df8008f",
+    measurementId: "G-JX4RP9LWR3"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+  const db = getDatabase(app);
+
+  // ==========================
+  // 画面切り替え
+  // ==========================
+  const screens = {
+    menu: document.getElementById('screen-menu'),
+    name: document.getElementById('screen-name'),
+    ten: document.getElementById('screen-10yen'),
+    janken: document.getElementById('screen-janken'),
+  };
+
+  function showScreen(key) {
+    Object.values(screens).forEach(el => el.classList.remove('active'));
+    screens[key].classList.add('active');
+  }
+
+  document.getElementById('toNameInputBtn').addEventListener('click', () => {
+    showScreen('name');
+  });
+
+  document.getElementById('toJankenBtn').addEventListener('click', () => {
+    showScreen('janken');
+  });
+
+  document.getElementById('backToMenuBtn').addEventListener('click', () => {
+    showScreen('menu');
+  });
+
+  // ==========================
+  // 名前管理
+  // ==========================
+  const nameInput = document.getElementById('playerNameInput');
+  const decideNameBtn = document.getElementById('decideNameBtn');
+
+  let myName = localStorage.getItem('10yen_name') || '';
+  if (myName) {
+    nameInput.value = myName;
+  }
+
+  decideNameBtn.addEventListener('click', () => {
+    const v = nameInput.value.trim();
+    myName = v || 'Player';
+    localStorage.setItem('10yen_name', myName);
+    showScreen('ten');
+  });
+
+  // ==========================
+  // 10円ゲーム：Firebase 状態
+  // ==========================
+  const playingNameEl = document.getElementById('playingName');
+  const waitingNamesEl = document.getElementById('waitingNames');
+  const stateLabelEl = document.getElementById('stateLabel');
+  const infoMsgEl = document.getElementById('infoMsg');
+
+  const insertCoinBtn = document.getElementById('insertCoinBtn');
+  const waitBtn = document.getElementById('waitBtn');
+  const endGameBtn = document.getElementById('endGameBtn');
+
+  const tiltRange = document.getElementById('tiltRange');
+  const shootRange = document.getElementById('shootRange');
+
+  const GAME_ROOT = ref(db, 'tenyenGame');
+  const PLAYING_REF = ref(db, 'tenyenGame/playing');
+  const WAITING_REF = ref(db, 'tenyenGame/waiting');
+  const LAST_ACTION_REF = ref(db, 'tenyenGame/lastAction');
+
+  let currentPlaying = null; // {name: string} or null
+  let waitingList = [];      // [{id, name}, ...]
+
+  // 状態：A/B/Cをローカルで判定
+  function calcState() {
+    if (!currentPlaying || !currentPlaying.name) return 'A'; // 誰もプレイしていない
+    if (currentPlaying.name === myName) return 'C';          // 自分がプレイ中
+    return 'B';                                             // 誰かがプレイ中
+  }
+
+  function updateUIState() {
+    const st = calcState();
+    if (st === 'A') {
+      stateLabelEl.textContent = '状態：今なら遊べます';
+      insertCoinBtn.disabled = false;
+      waitBtn.disabled = false;
+      endGameBtn.disabled = true;
+      setControlEnabled(false);
+    } else if (st === 'B') {
+      stateLabelEl.textContent = `状態：${currentPlaying?.name || '-'} が挑戦中（観戦中）`;
+      insertCoinBtn.disabled = true;
+      waitBtn.disabled = false;
+      endGameBtn.disabled = true;
+      setControlEnabled(false);
+    } else {
+      stateLabelEl.textContent = '状態：あなたがプレイ中';
+      insertCoinBtn.disabled = true;
+      waitBtn.disabled = true;
+      endGameBtn.disabled = false;
+      setControlEnabled(true);
+    }
+
+    // 待機表示
+    if (waitingList.length === 0) {
+      waitingNamesEl.textContent = '0人';
+    } else {
+      const names = waitingList.map(w => w.name).join(' / ');
+      waitingNamesEl.textContent = `${waitingList.length}人（${names}）`;
+    }
+
+    playingNameEl.textContent = currentPlaying?.name || '-';
+  }
+
+  function setControlEnabled(flag) {
+    tiltRange.disabled = !flag;
+    shootRange.disabled = !flag;
+  }
+
+  // Firebase リスナー
+  onValue(PLAYING_REF, (snapshot) => {
+    const val = snapshot.val();
+    currentPlaying = val || null;
+    updateUIState();
+  });
+
+  onValue(WAITING_REF, (snapshot) => {
+    const val = snapshot.val() || {};
+    waitingList = Object.keys(val).map(id => ({
+      id,
+      name: val[id].name || 'Player'
+    }));
+    updateUIState();
+  });
+
+  // ==========================
+  // 10円ゲーム：操作ボタン
+  // ==========================
+  function touchAction() {
+    // 最終操作時刻を更新（放置検知用）
+    update(LAST_ACTION_REF, { time: serverTimestamp() });
+  }
+
+  insertCoinBtn.addEventListener('click', async () => {
+    const st = calcState();
+    if (st !== 'A') return; // 念のためクライアント側でも確認
+
+    const name = myName || 'Player';
+    await set(PLAYING_REF, { name });
+    await set(WAITING_REF, {}); // プレイヤーは待機から削除（シンプルに全消し）
+    touchAction();
+    infoMsgEl.textContent = '10円が投入されました。レバーで操作してください。';
+    resetCoin();
+  });
+
+  waitBtn.addEventListener('click', async () => {
+    const name = myName || 'Player';
+    // すでに waiting に居ないか軽くチェック
+    const already = waitingList.find(w => w.name === name);
+    if (already) {
+      infoMsgEl.textContent = 'すでに待機リストに入っています。';
+      return;
+    }
+    const newRef = push(WAITING_REF);
+    await set(newRef, { name, time: serverTimestamp() });
+    touchAction();
+    infoMsgEl.textContent = '待機列に入りました。譲り合って遊んでください。';
+  });
+
+  endGameBtn.addEventListener('click', async () => {
+    const st = calcState();
+    if (st !== 'C') return; // 自分がプレイ中のみ
+    await set(PLAYING_REF, null);
+    touchAction();
+    infoMsgEl.textContent = 'ゲームを終了しました。';
+    resetCoin();
+  });
+
+  // 放置検知（クライアント側からも軽くチェック）
+  // ここでは「ローカルタイマー」で、60秒入力なしで自動終了（C->A）
+  let idleTimer = null;
+  function resetIdleTimer() {
+    if (idleTimer) clearTimeout(idleTimer);
+    if (calcState() === 'C') {
+      idleTimer = setTimeout(async () => {
+        // 放置とみなして操作権を返す
+        const st = calcState();
+        if (st === 'C') {
+          await set(PLAYING_REF, null);
+          infoMsgEl.textContent = '操作がなかったため、自動で終了しました。';
+          resetCoin();
+        }
+      }, 60 * 1000);
+    }
+  }
+
+  ['click', 'input'].forEach(ev => {
+    document.addEventListener(ev, () => {
+      if (calcState() === 'C') {
+        resetIdleTimer();
+      }
+    });
+  });
+
+  // ==========================
+  // 10円ゲーム：簡易物理（疑似）
+  // ==========================
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // 背景画像や判定PNGを使う場合の読み込み準備（いまは未使用だが構造だけ用意）
+  const images = {
+    map: null,   // 表示用
+    ren: null,   // レーン（判定）
+    ana: null,   // 失敗穴
+    atari: null, // 成功穴
+  };
+
+  function loadImage(key, url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        images[key] = img;
+        resolve();
+      };
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
+  async function loadAssets() {
+    try {
+      // 必要なPNGをここに定義（あとで差し替え）
+      // 例:
+      // await loadImage('map', 'https://raw.githubusercontent.com/yumemiru28000/zzHBD1/main/map.png');
+      // await loadImage('ren', 'https://raw.githubusercontent.com/yumemiru28000/zzHBD1/main/ren.png');
+      // await loadImage('ana', 'https://raw.githubusercontent.com/yumemiru28000/zzHBD1/main/ana.png');
+      // await loadImage('atari', 'https://raw.githubusercontent.com/yumemiru28000/zzHBD1/main/atari.png');
+    } catch (e) {
+      console.warn('画像読み込みに失敗しました:', e);
+    }
+  }
+
+  // 10円玉の状態
+  const coin = {
+    x: canvas.width / 2,
+    y: canvas.height - 40,
+    vx: 0,
+    vy: 0,
+    r: 12,
+    inPlay: false, // true：盤上にある
+    cleared: false,
+    failed: false,
+  };
+
+  function resetCoin() {
+    coin.x = canvas.width / 2;
+    coin.y = canvas.height - 40;
+    coin.vx = 0;
+    coin.vy = 0;
+    coin.inPlay = false;
+    coin.cleared = false;
+    coin.failed = false;
+  }
+
+  // 簡易物理パラメータ
+  let baseGravity = 0.25;   // 下方向重力
+  let tiltFactor = 0.02;    // 傾き→横方向重力係数
+  let friction = 0.01;      // 床との摩擦（減速）
+
+  function updatePhysics() {
+    if (!coin.inPlay) return;
+    if (coin.cleared || coin.failed) return;
+
+    // レバー値から「傾き」を取得
+    const tiltDeg = Number(tiltRange.value); // -30 ～ 30
+    const tiltRad = tiltDeg * Math.PI / 180;
+
+    // 重力ベクトル（下＋左右）
+    const gx = Math.sin(tiltRad) * baseGravity;
+    const gy = Math.cos(tiltRad) * baseGravity;
+
+    coin.vx += gx;
+    coin.vy += gy;
+
+    // 摩擦（だんだん減速するが、完全には止まりにくい）
+    coin.vx *= (1 - friction);
+    coin.vy *= (1 - friction);
+
+    coin.x += coin.vx;
+    coin.y += coin.vy;
+
+    // 筐体の枠に軽いバウンス
+    const bounce = 0.4;
+    if (coin.x - coin.r < 0) {
+      coin.x = coin.r;
+      coin.vx *= -bounce;
+    }
+    if (coin.x + coin.r > canvas.width) {
+      coin.x = canvas.width - coin.r;
+      coin.vx *= -bounce;
+    }
+    if (coin.y - coin.r < 0) {
+      coin.y = coin.r;
+      coin.vy *= -bounce;
+    }
+    if (coin.y + coin.r > canvas.height) {
+      coin.y = canvas.height - coin.r;
+      coin.vy *= -bounce;
+    }
+
+    // 簡易版：底付近に「成功穴」「失敗穴」のイメージ判定
+    // あとで PNG ベースの判定に差し替え予定
+    if (coin.y > canvas.height - 60) {
+      const centerX = canvas.width / 2;
+      const dx = coin.x - centerX;
+      if (Math.abs(dx) < 30) {
+        // 中央に入ったら成功
+        coin.cleared = true;
+        coin.inPlay = false;
+        infoMsgEl.textContent = 'SUCCESS！おめでとう！';
+      } else if (coin.x < 80 || coin.x > canvas.width - 80) {
+        // 左右に落ちたら失敗
+        coin.failed = true;
+        coin.inPlay = false;
+        infoMsgEl.textContent = '失敗…。また挑戦してね。';
+      }
+    }
+  }
+
+  function drawGame() {
+    // 背景
+    if (images.map) {
+      ctx.drawImage(images.map, 0, 0, canvas.width, canvas.height);
+    } else {
+      // 仮のレーン表示（あとで map.png に置き換え）
+      const grd = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      grd.addColorStop(0, '#333');
+      grd.addColorStop(1, '#000');
+      ctx.fillStyle = grd;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 簡易レーン
+      ctx.strokeStyle = '#777';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(40, 40);
+      ctx.lineTo(canvas.width - 40, 120);
+      ctx.lineTo(40, 220);
+      ctx.lineTo(canvas.width - 60, 320);
+      ctx.lineTo(60, 400);
+      ctx.lineTo(canvas.width - 40, canvas.height - 60);
+      ctx.stroke();
+
+      // 成功穴イメージ
+      ctx.fillStyle = '#0f0';
+      ctx.beginPath();
+      ctx.arc(canvas.width / 2, canvas.height - 20, 14, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 失敗穴イメージ（左右）
+      ctx.fillStyle = '#800';
+      ctx.beginPath();
+      ctx.arc(40, canvas.height - 20, 14, 0, Math.PI * 2);
+      ctx.arc(canvas.width - 40, canvas.height - 20, 14, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 10円玉
+    if (coin.inPlay || coin.cleared || coin.failed) {
+      ctx.save();
+      ctx.translate(coin.x, coin.y);
+      const speed = Math.sqrt(coin.vx * coin.vx + coin.vy * coin.vy);
+      const rot = performance.now() * 0.005 * speed; // 動いているほど速く回転
+
+      ctx.rotate(rot);
+
+      const gradient = ctx.createRadialGradient(0, 0, coin.r * 0.2, 0, 0, coin.r);
+      gradient.addColorStop(0, '#ffe8a0');
+      gradient.addColorStop(1, '#c08a2a');
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, coin.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#5b3a10';
+      ctx.font = 'bold 12px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('10', 0, 0);
+
+      ctx.restore();
+    }
+  }
+
+  function gameLoop() {
+    requestAnimationFrame(gameLoop);
+    updatePhysics();
+    drawGame();
+  }
+
+  // レバー操作 → 物理パラメータ更新
+  shootRange.addEventListener('input', () => {
+    // 発射レバー：C状態 & まだ coin.inPlay でないときに、閾値を超えたら発射
+    if (calcState() !== 'C') return;
+    const val = Number(shootRange.value); // 0-100
+    if (!coin.inPlay && val >= 80) {
+      // 発射
+      coin.inPlay = true;
+      coin.cleared = false;
+      coin.failed = false;
+      coin.x = canvas.width / 2;
+      coin.y = canvas.height - 60;
+      coin.vx = (Math.random() - 0.5) * 2; // 少しランダム
+      coin.vy = -3.5;
+      infoMsgEl.textContent = '10円発射！傾きレバーで調整してね。';
+      touchAction();
+      shootRange.value = 0;
+    }
+  });
+
+  tiltRange.addEventListener('input', () => {
+    // 自分がプレイ中だけ有効
+    if (calcState() === 'C') {
+      touchAction();
+    }
+  });
+
+  // 初期化
+  loadAssets().then(() => {
+    resetCoin();
+    gameLoop();
+  });
+
+  // ==========================
+  // じゃんけん（仮）
+  // ==========================
+  const jankenDummyBtn = document.getElementById('jankenDummyBtn');
+  const jankenResult = document.getElementById('jankenResult');
+  jankenDummyBtn.addEventListener('click', () => {
+    const hands = ['グー', 'チョキ', 'パー'];
+    const myHand = hands[Math.floor(Math.random() * 3)];
+    const cpuHand = hands[Math.floor(Math.random() * 3)];
+    let result;
+    if (myHand === cpuHand) result = 'あいこ';
+    else if (
+      (myHand === 'グー' && cpuHand === 'チョキ') ||
+      (myHand === 'チョキ' && cpuHand === 'パー') ||
+      (myHand === 'パー' && cpuHand === 'グー')
+    ) result = 'あなたの勝ち';
+    else result = 'あなたの負け';
+    jankenResult.textContent = `あなた：${myHand} / CPU：${cpuHand} → ${result}`;
+  });
+
+</script>
+
+</body>
+</html>
