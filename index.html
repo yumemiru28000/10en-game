@@ -193,7 +193,7 @@
     <div id="gameContainer">
       <!-- map.png をそのまま背景に使いたい場合：CSSで貼ってもOK -->
       <!-- #gameCanvas { background-image:url('.../map.png'); background-size:cover; } など -->
-      <canvas id="gameCanvas" width="360" height="480"></canvas>
+      <canvas id="gameCanvas" width="282" height="521"></canvas>
     </div>
 
     <div class="center" style="margin-top:8px;">
@@ -489,7 +489,7 @@
   async function loadAssets() {
     // TODO: 実際のPNGに差し替えてください
     // 例）"https://raw.githubusercontent.com/yumemiru28000/zzHBD1/main/map.png"
-    const base = "https://raw.githubusercontent.com/yumemiru28000/zzHBD1/main";
+    const base = "https://raw.githubusercontent.com/yumemiru28000/10en-game/main";
 
     await loadImage('map',   `${base}/map.png`);   // 見た目
     await loadImage('ren',   `${base}/ren.png`);   // 黒=床・壁
