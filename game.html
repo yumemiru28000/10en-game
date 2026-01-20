@@ -165,53 +165,163 @@
     return comps;
   }
 
-  // 黒塗りから「境界点」を拾う（輪郭を厳密追跡せず、簡易に線分化するための前処理）
-  function extractBoundaryPoints(blackMask, w, h){
-    const pts = [];
-    const idx = (x,y)=>y*w+x;
-    for(let y=1;y<h-1;y++){
-      for(let x=1;x<w-1;x++){
-        const i = idx(x,y);
-        if (!blackMask[i]) continue;
-        // 周囲に非黒があれば境界
-        if (!blackMask[idx(x-1,y)] || !blackMask[idx(x+1,y)] || !blackMask[idx(x,y-1)] || !blackMask[idx(x,y+1)]) {
-          pts.push({x,y});
+  // --- Configuration constants ---
+  const EDGE_THICKNESS = 5;  // Thickness of terrain segments
+  const RDP_EPSILON = 2.0;   // Simplification tolerance for RDP
+  const MIN_SEG_LEN = 2;     // Minimum segment length to create
+
+  // --- Marching Squares: 輪郭抽出 ---
+  // blackMask から境界の順序付きポリライン群を抽出
+  function marchingSquares(mask, w, h) {
+    const idx = (x,y) => y*w+x;
+    
+    // 各セルの4コーナーの状態からケースを決定 (0-15)
+    // 時計回り: 左上、右上、右下、左下
+    function getCase(x, y) {
+      let val = 0;
+      if (y > 0 && x > 0 && mask[idx(x-1, y-1)]) val |= 1;
+      if (y > 0 && x < w && mask[idx(x, y-1)]) val |= 2;
+      if (y < h && x < w && mask[idx(x, y)]) val |= 4;
+      if (y < h && x > 0 && mask[idx(x-1, y)]) val |= 8;
+      return val;
+    }
+
+    // エッジを抽出: 各セルケースに対応するエッジリスト
+    // エッジは [x0,y0,x1,y1] で表現 (0.5刻みの座標)
+    const edgeTable = {
+      0: [], 15: [],
+      1: [[0,0.5,0.5,0]], 2: [[0.5,0,1,0.5]], 4: [[0.5,1,1,0.5]], 8: [[0,0.5,0.5,1]],
+      3: [[0,0.5,1,0.5]], 6: [[0.5,0,0.5,1]], 9: [[0.5,0,0.5,1]], 12: [[0,0.5,1,0.5]],
+      5: [[0,0.5,0.5,1],[0.5,0,1,0.5]], 10: [[0,0.5,0.5,0],[0.5,1,1,0.5]],
+      7: [[0.5,1,1,0.5]], 11: [[0.5,1,1,0.5]], 13: [[0.5,0,1,0.5]], 14: [[0,0.5,0.5,0]]
+    };
+
+    // 全エッジを収集
+    const edges = [];
+    for (let y = 0; y <= h; y++) {
+      for (let x = 0; x <= w; x++) {
+        const c = getCase(x, y);
+        const es = edgeTable[c] || [];
+        for (const [dx0,dy0,dx1,dy1] of es) {
+          edges.push({
+            x0: x + dx0, y0: y + dy0,
+            x1: x + dx1, y1: y + dy1
+          });
         }
       }
     }
-    return pts;
+
+    // エッジをポリラインに接続
+    const polylines = [];
+    const used = new Uint8Array(edges.length);
+    
+    for (let i = 0; i < edges.length; i++) {
+      if (used[i]) continue;
+      
+      const poly = [{x: edges[i].x0, y: edges[i].y0}, {x: edges[i].x1, y: edges[i].y1}];
+      used[i] = 1;
+      
+      // 末尾に接続可能なエッジを探す
+      let changed = true;
+      while (changed) {
+        changed = false;
+        const last = poly[poly.length - 1];
+        
+        for (let j = 0; j < edges.length; j++) {
+          if (used[j]) continue;
+          const e = edges[j];
+          
+          const d0 = Math.hypot(last.x - e.x0, last.y - e.y0);
+          const d1 = Math.hypot(last.x - e.x1, last.y - e.y1);
+          
+          if (d0 < 0.01) {
+            poly.push({x: e.x1, y: e.y1});
+            used[j] = 1;
+            changed = true;
+            break;
+          } else if (d1 < 0.01) {
+            poly.push({x: e.x0, y: e.y0});
+            used[j] = 1;
+            changed = true;
+            break;
+          }
+        }
+      }
+      
+      // 先頭にも接続可能なエッジを探す
+      changed = true;
+      while (changed) {
+        changed = false;
+        const first = poly[0];
+        
+        for (let j = 0; j < edges.length; j++) {
+          if (used[j]) continue;
+          const e = edges[j];
+          
+          const d0 = Math.hypot(first.x - e.x0, first.y - e.y0);
+          const d1 = Math.hypot(first.x - e.x1, first.y - e.y1);
+          
+          if (d0 < 0.01) {
+            poly.unshift({x: e.x1, y: e.y1});
+            used[j] = 1;
+            changed = true;
+            break;
+          } else if (d1 < 0.01) {
+            poly.unshift({x: e.x0, y: e.y0});
+            used[j] = 1;
+            changed = true;
+            break;
+          }
+        }
+      }
+      
+      if (poly.length >= 2) {
+        polylines.push(poly);
+      }
+    }
+    
+    return polylines;
   }
 
-  // 境界点を「近傍でつないでポリラインっぽく」する簡易法
-  // 完璧な輪郭追跡ではないが、まず“坂として転がる地形”を作るための実用近似。
-  function pointsToSegmentsApprox(points, sampleStep=6){
-    // グリッド化して間引きし、近い点同士を結ぶ
-    // ※本命は輪郭追跡+RDPだが、まず動くこと優先
-    const segs = [];
-    const used = new Uint8Array(points.length);
-
-    // ざっくり近い順に結ぶ
-    for(let i=0;i<points.length;i+=sampleStep){
-      const p = points[i];
-      if (!p) continue;
-
-      // 近い点を1つ探して線分にする
-      let bestJ = -1;
-      let bestD2 = Infinity;
-      for(let j=i+1;j<Math.min(points.length, i+200);j++){
-        const q = points[j];
-        const dx=q.x-p.x, dy=q.y-p.y;
-        const d2=dx*dx+dy*dy;
-        if (d2>1 && d2<bestD2 && d2< (sampleStep*sampleStep*16)) {
-          bestD2=d2; bestJ=j;
-        }
-      }
-      if (bestJ>=0){
-        const q = points[bestJ];
-        segs.push({x1:p.x,y1:p.y,x2:q.x,y2:q.y});
+  // --- Ramer-Douglas-Peucker: ポリライン簡略化 ---
+  function simplifyPolylineRDP(points, epsilon) {
+    if (points.length < 3) return points;
+    
+    // 始点と終点を結ぶ線分から最も遠い点を探す
+    let maxDist = 0;
+    let maxIndex = 0;
+    const first = points[0];
+    const last = points[points.length - 1];
+    
+    for (let i = 1; i < points.length - 1; i++) {
+      const dist = perpendicularDistance(points[i], first, last);
+      if (dist > maxDist) {
+        maxDist = dist;
+        maxIndex = i;
       }
     }
-    return segs;
+    
+    // 閾値以上なら分割して再帰
+    if (maxDist > epsilon) {
+      const left = simplifyPolylineRDP(points.slice(0, maxIndex + 1), epsilon);
+      const right = simplifyPolylineRDP(points.slice(maxIndex), epsilon);
+      return left.slice(0, -1).concat(right);
+    } else {
+      return [first, last];
+    }
+  }
+  
+  function perpendicularDistance(point, lineStart, lineEnd) {
+    const dx = lineEnd.x - lineStart.x;
+    const dy = lineEnd.y - lineStart.y;
+    const norm = Math.hypot(dx, dy);
+    if (norm < 0.001) return Math.hypot(point.x - lineStart.x, point.y - lineStart.y);
+    
+    const t = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / (norm * norm);
+    const projX = lineStart.x + t * dx;
+    const projY = lineStart.y + t * dy;
+    
+    return Math.hypot(point.x - projX, point.y - projY);
   }
 
   // Matter.js: 線分→薄い矩形ボディ（静的）
@@ -257,6 +367,7 @@
 
   let touchingGround = false;
   let lastGroundNormal = null;
+  let postLaunchGraceUntil = 0; // Post-launch grace period to reduce collision artifacts
 
   // レバー（簡易）：画面上でドラッグしてパワー決定。対象バネは「範囲内で最も近いもの」
   let dragging=false;
@@ -432,20 +543,52 @@
   }
 
   function addTerrainFromBlack(blackMask){
-    // 境界点→簡易線分化→薄板ボディ
-    const boundaryPts = extractBoundaryPoints(blackMask, mapW, mapH);
-    const segs = pointsToSegmentsApprox(boundaryPts, 6);
-
+    // Marching Squares で輪郭抽出 → RDP で簡略化 → 線分ボディ化
+    const polylines = marchingSquares(blackMask, mapW, mapH);
+    
     const bodies = [];
-    for (const seg of segs){
-      const b = segmentToBody(Matter, seg, 4, {
-        render: { fillStyle: "#222" }
-      });
-      b.label = "terrain";
-      bodies.push(b);
+    let totalSegments = 0;
+    
+    for (const poly of polylines) {
+      // RDP で簡略化
+      const simplified = simplifyPolylineRDP(poly, RDP_EPSILON);
+      
+      // 連続する点を線分ボディに変換
+      for (let i = 0; i < simplified.length - 1; i++) {
+        const p1 = simplified[i];
+        const p2 = simplified[i + 1];
+        
+        const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        if (len < MIN_SEG_LEN) continue; // 短すぎる線分はスキップ
+        
+        const seg = { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
+        const b = segmentToBody(Matter, seg, EDGE_THICKNESS, {
+          render: { fillStyle: "#222" }
+        });
+        b.label = "terrain";
+        bodies.push(b);
+        totalSegments++;
+      }
+      
+      // 閉じたループの場合、最後と最初をつなぐ
+      if (simplified.length >= 3) {
+        const first = simplified[0];
+        const last = simplified[simplified.length - 1];
+        const dist = Math.hypot(last.x - first.x, last.y - first.y);
+        if (dist < 2) { // 始点と終点が近ければループを閉じる
+          const seg = { x1: last.x, y1: last.y, x2: first.x, y2: first.y };
+          const b = segmentToBody(Matter, seg, EDGE_THICKNESS, {
+            render: { fillStyle: "#222" }
+          });
+          b.label = "terrain";
+          bodies.push(b);
+          totalSegments++;
+        }
+      }
     }
+    
     World.add(engine.world, bodies);
-    return { boundaryPtsCount: boundaryPts.length, segCount: segs.length };
+    return { polylineCount: polylines.length, segCount: totalSegments };
   }
 
   function findSpawnFromGreen(greenComps){
@@ -489,8 +632,9 @@
     Body.setVelocity(coin, { x: s.dir * impulse, y: -impulse * verticalBias });
     Body.setAngularVelocity(coin, 0);
 
-    // 0.3秒クールダウン
+    // 0.3秒クールダウン + 50ms post-launch grace period
     s.cooldownUntil = now + 0.3;
+    postLaunchGraceUntil = now + 0.05; // 50ms grace period
   }
 
   function installEvents(){
@@ -536,6 +680,10 @@
         `springs: ${springs.length}, holes: ${holes.length}`,
         dragging ? `drag: ${(Math.hypot(dragNow.x-dragStart.x, dragNow.y-dragStart.y)).toFixed(1)}px` : `drag: -`
       ]);
+
+      // Skip ground friction during post-launch grace period
+      const now = currentTimeSec();
+      if (now < postLaunchGraceUntil) return;
 
       if (!touchingGround || !lastGroundNormal) return;
 
@@ -643,7 +791,7 @@
     setStatus([
       `map: ${mapW}x${mapH}`,
       `spawn: (${spawnPoint.x.toFixed(1)}, ${spawnPoint.y.toFixed(1)})`,
-      `terrain boundaryPts=${terrainInfo.boundaryPtsCount} segs=${terrainInfo.segCount}`,
+      `terrain polylines=${terrainInfo.polylineCount} segs=${terrainInfo.segCount}`,
       `holes=${redComps.length} springs=${Math.min(6, yellowComps.length)}`,
       `ready`
     ]);
