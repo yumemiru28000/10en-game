@@ -51,18 +51,35 @@ New rendering code added in `afterRender` event:
 2. **Direction Arrow**: Shows "→" or "←" indicating push direction
 
 ### 4. Drag Mechanics
-- Maximum drag distance: 140px
-- Power calculation: `power01 = Math.min(1, dragDistance / 140)`
+- Maximum drag distance: 140px (configurable via MAX_PULL_DISTANCE constant)
+- Power calculation: `power01 = Math.min(1, dragDistance / MAX_PULL_DISTANCE)`
 - Active spring is captured at drag start and used throughout the interaction
 - Power is applied when mouse/touch is released
 
+### 5. Configuration Constants
+All visual parameters are defined as constants for easy adjustment:
+- `MAX_PULL_DISTANCE = 140`: Maximum drag distance in pixels
+- `GAUGE_WARNING_THRESHOLD = 0.9`: Warning threshold (90%)
+- `GAUGE_COLOR_MID_THRESHOLD = 0.5`: Color transition point (50%)
+- `GAUGE_WIDTH = 80`: Gauge bar width in pixels
+- `GAUGE_HEIGHT = 15`: Gauge bar height in pixels
+- `GAUGE_OFFSET_X = 60`: Horizontal offset from spring center
+- `GAUGE_OFFSET_Y = 20`: Vertical offset from spring center
+- `ARROW_OFFSET_Y = 30`: Vertical offset for direction arrow
+
 ## Files Modified
-- `game.html`: Added visual gauge rendering and improved drag tracking
+- `game.html`: Added visual gauge rendering, improved drag tracking, extracted all constants
+
+## Code Quality
+- All magic numbers extracted to named constants
+- Consistent code style maintained
+- Clear comments in Japanese and English
+- No security vulnerabilities detected
 
 ## Testing Notes
 - The game requires Matter.js to run (loaded from CDN)
 - In sandbox environments without CDN access, the logic can be verified by code review
-- The implementation follows the existing code patterns and integrates with the current spring mechanism
+- The implementation follows the existing code patterns and integrates seamlessly with the current spring mechanism
 
 ## Visual Features Added
 1. Real-time power gauge display during drag
@@ -70,3 +87,6 @@ New rendering code added in `afterRender` event:
 3. Maximum power warning
 4. Direction indicators for spring areas
 5. Visual connection between spring and drag point
+
+## Security Summary
+No security vulnerabilities were detected by CodeQL analysis.
