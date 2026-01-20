@@ -268,6 +268,11 @@
   const MAX_PULL_DISTANCE = 140; // 引ける最大距離（px）
   const GAUGE_WARNING_THRESHOLD = 0.9; // 警告表示の閾値（90%）
   const GAUGE_COLOR_MID_THRESHOLD = 0.5; // 色変化の中間点（50%）
+  const GAUGE_WIDTH = 80; // ゲージバーの幅（px）
+  const GAUGE_HEIGHT = 15; // ゲージバーの高さ（px）
+  const GAUGE_OFFSET_X = 60; // ゲージの横オフセット（px）
+  const GAUGE_OFFSET_Y = 20; // ゲージの縦オフセット（px）
+  const ARROW_OFFSET_Y = 30; // 方向矢印の縦オフセット（px）
 
   function setStatus(lines){
     statusEl.textContent = lines.join("\n");
@@ -593,21 +598,19 @@
         context.setLineDash([]);
 
         // ゲージバーをバネの横に表示
-        const gaugeX = activeSpring.center.x + (activeSpring.dir > 0 ? 60 : -140);
-        const gaugeY = activeSpring.center.y - 20;
-        const gaugeWidth = 80;
-        const gaugeHeight = 15;
+        const gaugeX = activeSpring.center.x + (activeSpring.dir > 0 ? GAUGE_OFFSET_X : -(GAUGE_OFFSET_X + GAUGE_WIDTH));
+        const gaugeY = activeSpring.center.y - GAUGE_OFFSET_Y;
 
         // 背景（枠）
         context.fillStyle = "rgba(0, 0, 0, 0.7)";
-        context.fillRect(gaugeX, gaugeY, gaugeWidth, gaugeHeight);
+        context.fillRect(gaugeX, gaugeY, GAUGE_WIDTH, GAUGE_HEIGHT);
         context.strokeStyle = "rgba(255, 255, 255, 0.8)";
         context.lineWidth = 2;
-        context.strokeRect(gaugeX, gaugeY, gaugeWidth, gaugeHeight);
+        context.strokeRect(gaugeX, gaugeY, GAUGE_WIDTH, GAUGE_HEIGHT);
 
         // パワーバー（グラデーション）
-        const fillWidth = gaugeWidth * power01;
-        const gradient = context.createLinearGradient(gaugeX, 0, gaugeX + gaugeWidth, 0);
+        const fillWidth = GAUGE_WIDTH * power01;
+        const gradient = context.createLinearGradient(gaugeX, 0, gaugeX + GAUGE_WIDTH, 0);
         if (power01 < GAUGE_COLOR_MID_THRESHOLD) {
           gradient.addColorStop(0, "#00ff00");
           gradient.addColorStop(1, "#ffff00");
@@ -619,15 +622,15 @@
           gradient.addColorStop(1, "#ff0000");
         }
         context.fillStyle = gradient;
-        context.fillRect(gaugeX, gaugeY, fillWidth, gaugeHeight);
+        context.fillRect(gaugeX, gaugeY, fillWidth, GAUGE_HEIGHT);
 
         // 限界マーク（90%の位置）
-        const limitX = gaugeX + gaugeWidth * GAUGE_WARNING_THRESHOLD;
+        const limitX = gaugeX + GAUGE_WIDTH * GAUGE_WARNING_THRESHOLD;
         context.strokeStyle = "rgba(255, 0, 0, 0.9)";
         context.lineWidth = 2;
         context.beginPath();
         context.moveTo(limitX, gaugeY);
-        context.lineTo(limitX, gaugeY + gaugeHeight);
+        context.lineTo(limitX, gaugeY + GAUGE_HEIGHT);
         context.stroke();
 
         // パワー値テキスト
@@ -635,13 +638,13 @@
         context.font = "12px sans-serif";
         context.textAlign = "center";
         const powerPercent = Math.floor(power01 * 100);
-        context.fillText(`${powerPercent}%`, gaugeX + gaugeWidth / 2, gaugeY - 5);
+        context.fillText(`${powerPercent}%`, gaugeX + GAUGE_WIDTH / 2, gaugeY - 5);
 
         // 限界超え警告
         if (power01 >= GAUGE_WARNING_THRESHOLD) {
           context.fillStyle = "#ff0000";
           context.font = "bold 14px sans-serif";
-          context.fillText("MAX!", gaugeX + gaugeWidth / 2, gaugeY + gaugeHeight + 18);
+          context.fillText("MAX!", gaugeX + GAUGE_WIDTH / 2, gaugeY + GAUGE_HEIGHT + 18);
         }
 
         context.restore();
@@ -660,7 +663,7 @@
             
             // 方向インジケーター（矢印）
             const arrowX = s.center.x;
-            const arrowY = s.center.y - 30;
+            const arrowY = s.center.y - ARROW_OFFSET_Y;
             
             context.fillStyle = "rgba(255, 255, 0, 0.8)";
             context.font = "bold 16px sans-serif";
