@@ -108,13 +108,13 @@
       box-shadow: 0 0 20px rgba(0,0,0,0.7);
     }
 
-    /* 表示だけ少しズーム（物理サイズ 282x521 はそのまま） */
+    /* 表示を少しズーム */
     #gameCanvas {
       display: block;
-      width: 110%;       /* ここを変えるとズーム倍率が変わる */
+      width: 110%;
       height: auto;
       background: #000;
-      transform: translateX(-5%); /* 中央寄せ */
+      transform: translateX(-5%);
     }
 
     .top-right-menu {
@@ -549,32 +549,28 @@
 
   const gravity=0.7, friction=0.012, bounce=0.25;
 
-  // ★ 完全押し出しロジック：ren黒と円周が重ならなくなるまで押し出す
+  // ==== 新基盤：距離＋MTD＋サブステップ ==== //
   function updatePhysics(){
     if (!coin.inPlay || coin.cleared || coin.failed) return;
 
-    const SUB_STEPS = 4;
+    const SUB_STEPS = 4;             // サブステップ数
     const stepGravity = gravity / SUB_STEPS;
     const stepFriction = 1 - Math.pow(1 - friction, 1 / SUB_STEPS);
-    const sampleCount = 16;
+    const sampleCount = 16;          // 円周サンプル数（法線方向を集めるため）
 
     for (let s = 0; s < SUB_STEPS; s++) {
-      // 直前位置（バックアップ）
-      let prevX = coin.x;
-      let prevY = coin.y;
-
-      // 1) 力を少しだけ適用
+      // 1) 力の適用（少しずつ）
       coin.vy += stepGravity;
       coin.vx *= (1 - stepFriction);
       coin.vy *= (1 - stepFriction);
 
-      // 2) 少しだけ移動
+      // 2) 少し移動（サブステップ分割）
       coin.x += coin.vx / SUB_STEPS;
       coin.y += coin.vy / SUB_STEPS;
 
-      // 3) renと重なっている間は押し出し続ける
+      // 3) ren（壁）との衝突解決：侵入している限り押し出す
       if (renData) {
-        for (let iter = 0; iter < 5; iter++) { // 最大5回押し出し
+        for (let iter = 0; iter < 6; iter++) { // 最大6回押し出し
           let nxSum = 0, nySum = 0, hitCount = 0;
 
           for (let i = 0; i < sampleCount; i++) {
@@ -582,22 +578,21 @@
             const sx = coin.x + Math.cos(ang) * coin.r;
             const sy = coin.y + Math.sin(ang) * coin.r;
             if (isBlackPixel(renData, sx, sy)) {
-              // 円中心→このサンプル方向ベクトル＝外向き法線の近似
               nxSum += Math.cos(ang);
               nySum += Math.sin(ang);
               hitCount++;
             }
           }
 
-          if (!hitCount) break; // どの方向にも当たってなければ完了
+          if (!hitCount) break; // どの方向にも当たっていなければOK
 
-          // 平均法線（外向き）
+          // 外向き平均法線ベクトル
           let nx = nxSum / hitCount;
           let ny = nySum / hitCount;
           const len = Math.sqrt(nx*nx + ny*ny) || 1;
           nx /= len; ny /= len;
 
-          // 壁にめり込む原因＝法線方向速度を殺す
+          // 法線方向速度を殺して、壁に押し付けられないようにする
           const vDotN = coin.vx*nx + coin.vy*ny;
           const vnX = vDotN * nx;
           const vnY = vDotN * ny;
@@ -606,14 +601,14 @@
           coin.vx = vtX;
           coin.vy = vtY;
 
-          // 法線方向へ押し出す
-          const pushOut = 1.5; // 小さめに押し出しを複数回
+          // 押し出し（MTD近似）：法線方向に半径の1/3ずつ押すイメージ
+          const pushOut = coin.r * 0.4;   // 必要なら 0.5〜0.6 に上げてもよい
           coin.x += nx * pushOut;
           coin.y += ny * pushOut;
         }
       }
 
-      // 4) 枠（サブステップ中もチェック）
+      // 4) 枠内に留める（バウンド）
       if (coin.x - coin.r < 0) {
         coin.x = coin.r;
         if (coin.vx < 0) coin.vx *= -bounce;
@@ -776,7 +771,7 @@
     infoMsgEl.textContent = `${lever.side==='left'?'左':'右'}レバーから発射！`;
   }
 
-  // ========= 描画（PNG可視化） =========
+  // ========= 描画 =========
   function drawGame(){
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
