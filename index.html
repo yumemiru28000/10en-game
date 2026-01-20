@@ -95,7 +95,6 @@
       opacity: 0.8;
     }
 
-    /* 10円ゲーム用 */
     #gameContainer {
       position: relative;
       width: 100%;
@@ -115,22 +114,49 @@
       background: #000;
     }
 
-    #leverContainer {
+    /* レバー表示エリア */
+    #leverRow {
       margin-top: 8px;
       display: flex;
-      justify-content: space-around;
-      align-items: center;
+      justify-content: space-between;
     }
 
-    .lever-group {
+    .lever-column {
+      flex: 1;
       display: flex;
       flex-direction: column;
       align-items: center;
-      flex: 1;
+      gap: 4px;
     }
 
-    input[type="range"] {
-      width: 90%;
+    .lever-visual {
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
+      border: 2px solid #888;
+      position: relative;
+      margin-bottom: 2px;
+      background: #111;
+      overflow: hidden;
+    }
+
+    .lever-stick {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 4px;
+      height: 18px;
+      background: #ccc;
+      transform-origin: bottom center;
+    }
+
+    .lever-label {
+      font-size: 11px;
+      opacity: 0.8;
+    }
+
+    .lever-slider {
+      width: 70%;
     }
 
     .top-right-menu {
@@ -191,8 +217,6 @@
     <div class="small" id="stateLabel">状態：接続中...</div>
 
     <div id="gameContainer">
-      <!-- map.png をそのまま背景に使いたい場合：CSSで貼ってもOK -->
-      <!-- #gameCanvas { background-image:url('.../map.png'); background-size:cover; } など -->
       <canvas id="gameCanvas" width="282" height="521"></canvas>
     </div>
 
@@ -202,20 +226,15 @@
       <button id="endGameBtn">ゲームを終わる</button>
     </div>
 
-    <div id="leverContainer">
-      <div class="lever-group">
-        <span class="small">傾き（左／右）</span>
-        <input type="range" id="tiltRange" min="-30" max="30" step="1" value="0">
-      </div>
-      <div class="lever-group">
-        <span class="small">発射レバー</span>
-        <input type="range" id="shootRange" min="0" max="100" step="1" value="0">
-      </div>
+    <!-- 6本レバー（左右に3本ずつ） -->
+    <div id="leverRow">
+      <div class="lever-column" id="leftLevers"></div>
+      <div class="lever-column" id="rightLevers"></div>
     </div>
 
     <div class="msg" id="infoMsg"></div>
     <div class="small">
-      ・誰もいない時：���なら遊べます<br>
+      ・誰もいない時：今なら遊べます<br>
       ・PLAYING：○○が挑戦中（観戦のみ）<br>
       ・待機：次に遊びたい人：n人
     </div>
@@ -251,7 +270,7 @@
     serverTimestamp,
   } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-database.js";
 
- const firebaseConfig = {
+  const firebaseConfig = {
     apiKey: "AIzaSyCC7KAv7V4j1Z6-o1Y8ikmb3r5htN9O_aA",
     authDomain: "zzgohan-280.firebaseapp.com",
     databaseURL: "https://zzgohan-280-default-rtdb.asia-southeast1.firebasedatabase.app",
@@ -261,7 +280,6 @@
     appId: "1:459336048542:web:ff6c825dec81cc7df8008f",
     measurementId: "G-JX4RP9LWR3"
   };
-
 
   const app = initializeApp(firebaseConfig);
   const analytics = getAnalytics(app);
@@ -324,20 +342,17 @@
   const waitBtn = document.getElementById('waitBtn');
   const endGameBtn = document.getElementById('endGameBtn');
 
-  const tiltRange = document.getElementById('tiltRange');
-  const shootRange = document.getElementById('shootRange');
-
   const PLAYING_REF = ref(db, 'tenyenGame/playing');
   const WAITING_REF = ref(db, 'tenyenGame/waiting');
   const LAST_ACTION_REF = ref(db, 'tenyenGame/lastAction');
 
-  let currentPlaying = null; // {name: string} or null
-  let waitingList = [];      // [{id, name}, ...]
+  let currentPlaying = null;
+  let waitingList = [];
 
   function calcState() {
-    if (!currentPlaying || !currentPlaying.name) return 'A'; // 誰もプレイしていない
-    if (currentPlaying.name === myName) return 'C';          // 自分がプレイ中
-    return 'B';                                              // 誰かがプレイ中
+    if (!currentPlaying || !currentPlaying.name) return 'A';
+    if (currentPlaying.name === myName) return 'C';
+    return 'B';
   }
 
   function updateUIState() {
@@ -347,19 +362,19 @@
       insertCoinBtn.disabled = false;
       waitBtn.disabled = false;
       endGameBtn.disabled = true;
-      setControlEnabled(false);
+      setLeverEnabled(false);
     } else if (st === 'B') {
       stateLabelEl.textContent = `状態：${currentPlaying?.name || '-'} が挑戦中（観戦中）`;
       insertCoinBtn.disabled = true;
       waitBtn.disabled = false;
       endGameBtn.disabled = true;
-      setControlEnabled(false);
+      setLeverEnabled(false);
     } else {
       stateLabelEl.textContent = '状態：あなたがプレイ中';
       insertCoinBtn.disabled = true;
       waitBtn.disabled = true;
       endGameBtn.disabled = false;
-      setControlEnabled(true);
+      setLeverEnabled(true);
     }
 
     if (waitingList.length === 0) {
@@ -372,9 +387,10 @@
     playingNameEl.textContent = currentPlaying?.name || '-';
   }
 
-  function setControlEnabled(flag) {
-    tiltRange.disabled = !flag;
-    shootRange.disabled = !flag;
+  function setLeverEnabled(flag) {
+    leverStates.forEach(l => {
+      l.slider.disabled = !flag;
+    });
   }
 
   onValue(PLAYING_REF, (snapshot) => {
@@ -403,8 +419,8 @@
     await set(PLAYING_REF, { name });
     await set(WAITING_REF, {});
     touchAction();
-    infoMsgEl.textContent = '10円が投入されました。レバーで操作してください。';
-    resetCoin();
+    infoMsgEl.textContent = '10円が投入されました。レバーで狙ってください。';
+    spawnCoinAtStart();
   });
 
   waitBtn.addEventListener('click', async () => {
@@ -429,7 +445,6 @@
     resetCoin();
   });
 
-  // クライアント側の簡易放置判定（60秒）
   let idleTimer = null;
   function resetIdleTimer() {
     if (idleTimer) clearTimeout(idleTimer);
@@ -450,25 +465,28 @@
   });
 
   // ==========================
-  // 10円ゲーム：PNGベース物理
+  // 10円ゲーム：PNG＆物理
   // ==========================
   const canvas = document.getElementById('gameCanvas');
   const ctx = canvas.getContext('2d');
 
-  // 表示用＆判定用画像
   const images = {
-    map: null,   // 表示用フィールド
-    ren: null,   // レーン
-    ana: null,   // 失敗
-    atari: null, // 成功
+    map: null,
+    ren: null,
+    ana: null,
+    atari: null,
+    kaisi: null,
+    reba: null,
+    reba1: null,
   };
 
-  // 判定用の隠しキャンバス
   const hitCanvas = document.createElement('canvas');
   const hitCtx = hitCanvas.getContext('2d');
   let renData = null;
   let anaData = null;
   let atariData = null;
+  let kaisiData = null;
+  let rebaData = null;
 
   function loadImage(key, url) {
     return new Promise((resolve, reject) => {
@@ -488,40 +506,51 @@
   }
 
   async function loadAssets() {
-    // TODO: 実際のPNGに差し替えてください
-    // 例）"https://raw.githubusercontent.com/yumemiru28000/zzHBD1/main/map.png"
     const base = "https://raw.githubusercontent.com/yumemiru28000/10en-game/main";
 
-    await loadImage('map',   `${base}/map.png`);   // 見た目
-    await loadImage('ren',   `${base}/ren.png`);   // 黒=床・壁
-    await loadImage('ana',   `${base}/ana.png`);   // 黒=失敗穴
-    await loadImage('atari', `${base}/atari.png`); // 黒=成功穴
+    await loadImage('map',   `${base}/map.png`);
+    await loadImage('ren',   `${base}/ren.png`);
+    await loadImage('ana',   `${base}/ana.png`);
+    await loadImage('atari', `${base}/atari.png`);
+    await loadImage('kaisi', `${base}/kaisi.png`);
+    await loadImage('reba',  `${base}/reba.png`);
+    await loadImage('reba1', `${base}/reba1.png`);
 
-    // キャンバスサイズと画像サイズを合わせる前提（違う場合はスケール調整が必要）
     hitCanvas.width  = canvas.width;
     hitCanvas.height = canvas.height;
 
-    // ren
     if (images.ren) {
       hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
       hitCtx.drawImage(images.ren, 0, 0, hitCanvas.width, hitCanvas.height);
       renData = hitCtx.getImageData(0, 0, hitCanvas.width, hitCanvas.height);
     }
-    // ana
+
     if (images.ana) {
       hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
       hitCtx.drawImage(images.ana, 0, 0, hitCanvas.width, hitCanvas.height);
       anaData = hitCtx.getImageData(0, 0, hitCanvas.width, hitCanvas.height);
     }
-    // atari
+
     if (images.atari) {
       hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
       hitCtx.drawImage(images.atari, 0, 0, hitCanvas.width, hitCanvas.height);
       atariData = hitCtx.getImageData(0, 0, hitCanvas.width, hitCanvas.height);
     }
+
+    if (images.kaisi) {
+      hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
+      hitCtx.drawImage(images.kaisi, 0, 0, hitCanvas.width, hitCanvas.height);
+      kaisiData = hitCtx.getImageData(0, 0, hitCanvas.width, hitCanvas.height);
+      detectStartPosition();
+    }
+
+    if (images.reba) {
+      hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
+      hitCtx.drawImage(images.reba, 0, 0, hitCanvas.width, hitCanvas.height);
+      rebaData = hitCtx.getImageData(0, 0, hitCanvas.width, hitCanvas.height);
+    }
   }
 
-  // ピクセルが「黒（#000に近い & alpha>0）」か判定
   function isBlackPixel(imgData, x, y) {
     if (!imgData) return false;
     const ix = Math.floor(x);
@@ -532,64 +561,76 @@
     const g = imgData.data[idx + 1];
     const b = imgData.data[idx + 2];
     const a = imgData.data[idx + 3];
-    if (a < 20) return false; // ほぼ透明は無視
-    const threshold = 40;     // 黒とみなす閾値
-    return (r < threshold && g < threshold && b < threshold);
+    if (a < 20) return false;
+    const th = 40;
+    return (r < th && g < th && b < th);
   }
 
-  // 10円玉の状態
+  // 10円玉状態と「重い感じ」の物理
   const coin = {
     x: canvas.width / 2,
-    y: canvas.height - 40,
+    y: canvas.height / 2,
     vx: 0,
     vy: 0,
-    r: 12,
+    r: 10,
     inPlay: false,
     cleared: false,
     failed: false,
   };
 
-  function resetCoin() {
-    coin.x = canvas.width / 2;
-    coin.y = canvas.height - 40;
+  let startPos = { x: canvas.width / 2, y: canvas.height / 2 };
+
+  function detectStartPosition() {
+    if (!kaisiData) return;
+    // 画面全体から最初の黒ピクセルを探す（簡易）
+    const w = kaisiData.width;
+    const h = kaisiData.height;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (isBlackPixel(kaisiData, x, y)) {
+          startPos = { x, y };
+          return;
+        }
+      }
+    }
+  }
+
+  function spawnCoinAtStart() {
+    coin.x = startPos.x;
+    coin.y = startPos.y;
     coin.vx = 0;
     coin.vy = 0;
+    coin.inPlay = true;
+    coin.cleared = false;
+    coin.failed = false;
+  }
+
+  function resetCoin() {
     coin.inPlay = false;
     coin.cleared = false;
     coin.failed = false;
   }
 
-  // 物理パラメータ
-  const baseGravity = 0.25;
-  const friction = 0.01;
-  const bounce = 0.35;
+  // 重力：縦置き台を想定して「下向き＋やや強め」
+  const gravity = 0.45;   // 重い硬貨イメージ
+  const friction = 0.02;
+  const bounce = 0.3;
 
   function updatePhysics() {
     if (!coin.inPlay) return;
     if (coin.cleared || coin.failed) return;
 
-    const tiltDeg = Number(tiltRange.value);
-    const tiltRad = tiltDeg * Math.PI / 180;
-
-    const gx = Math.sin(tiltRad) * baseGravity;
-    const gy = Math.cos(tiltRad) * baseGravity;
-
-    coin.vx += gx;
-    coin.vy += gy;
-
+    coin.vy += gravity;
     coin.vx *= (1 - friction);
     coin.vy *= (1 - friction);
 
-    // 予測位置
     let nextX = coin.x + coin.vx;
     let nextY = coin.y + coin.vy;
 
-    // === レーン判定（ren.png） ===
-    // 円周上の数点をサンプルして、もし「黒」にぶつかっていたら簡易反射
+    // レーンとの当たり判定
     if (renData) {
-      const sampleCount = 8;
+      const sampleCount = 10;
       let hitLeft = false, hitRight = false, hitTop = false, hitBottom = false;
-
       for (let i = 0; i < sampleCount; i++) {
         const angle = (Math.PI * 2 * i) / sampleCount;
         const sx = nextX + Math.cos(angle) * coin.r;
@@ -601,8 +642,6 @@
           if (Math.sin(angle) >  0.5) hitBottom = true;
         }
       }
-
-      // 簡易：ぶつかった方向に応じて速度を反転
       if (hitLeft && coin.vx < 0) {
         coin.vx *= -bounce;
         nextX = coin.x + coin.vx;
@@ -621,11 +660,10 @@
       }
     }
 
-    // 位置更新
     coin.x = nextX;
     coin.y = nextY;
 
-    // 筐体の端のガード（PNG外に飛び出しすぎないよう軽く制限）
+    // 枠の内側に軽く押し戻す
     if (coin.x - coin.r < 0) {
       coin.x = coin.r;
       coin.vx *= -bounce;
@@ -643,71 +681,199 @@
       coin.vy *= -bounce;
     }
 
-    // === 失敗穴判定（ana.png） ===
+    // 失敗穴
     if (anaData) {
-      const cx = coin.x;
-      const cy = coin.y;
-      if (isBlackPixel(anaData, cx, cy)) {
+      if (isBlackPixel(anaData, coin.x, coin.y)) {
         coin.failed = true;
         coin.inPlay = false;
         infoMsgEl.textContent = '失敗…。また挑戦してね。';
       }
     }
-
-    // === 成功穴判定（atari.png） ===
+    // 成功穴
     if (atariData && !coin.failed && !coin.cleared) {
-      const cx = coin.x;
-      const cy = coin.y;
-      if (isBlackPixel(atariData, cx, cy)) {
+      if (isBlackPixel(atariData, coin.x, coin.y)) {
         coin.cleared = true;
         coin.inPlay = false;
         infoMsgEl.textContent = 'SUCCESS！おめでとう！';
-        // 本当は「景品がボトッと落ちるアニメ」をここでやる
       }
     }
   }
 
+  // ==========================
+  // レバー6本
+  // ==========================
+  const leftLeversEl = document.getElementById('leftLevers');
+  const rightLeversEl = document.getElementById('rightLevers');
+
+  // index: 0,1,2 = 左上～左下 / 3,4,5 = 右上～右下
+  const leverStates = [];
+
+  function createLever(index, side) {
+    const col = (side === 'left') ? leftLeversEl : rightLeversEl;
+
+    const wrapper = document.createElement('div');
+
+    const visual = document.createElement('div');
+    visual.className = 'lever-visual';
+
+    const stick = document.createElement('div');
+    stick.className = 'lever-stick';
+    stick.style.transform = 'translate(-50%, 0) rotate(0deg)';
+    visual.appendChild(stick);
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '100';     // 0~100 引き量
+    slider.step = '1';
+    slider.value = '0';
+    slider.className = 'lever-slider';
+
+    const label = document.createElement('div');
+    label.className = 'lever-label';
+    label.textContent = side === 'left' ? `L${index+1}` : `R${index-2}`;
+
+    wrapper.appendChild(visual);
+    wrapper.appendChild(slider);
+    wrapper.appendChild(label);
+    col.appendChild(wrapper);
+
+    const lever = { index, side, slider, stick, value: 0 };
+    leverStates.push(lever);
+
+    let prevValue = 0;
+
+    slider.addEventListener('input', () => {
+      if (calcState() !== 'C') {
+        slider.value = '0';
+        return;
+      }
+      const v = Number(slider.value);
+      lever.value = v;
+
+      // レバーの見た目回転：0 → -90度（時計回り）
+      const angle = -90 * (v / 100);
+      stick.style.transform = `translate(-50%, 0) rotate(${angle}deg)`;
+
+      // 引くにしたがって重く感じるのは、アニメ側だけでは難しいのでここでは速度計算に使う
+
+      // 「離した瞬間」を検知（v が急に下がったら）
+      if (prevValue > 20 && v < 5) {
+        const power = prevValue / 100; // 0~1
+        fireLever(lever, power);
+      }
+
+      prevValue = v;
+      touchAction();
+    });
+  }
+
+  function setupLevers() {
+    // 左3本 (index 0,1,2)
+    for (let i = 0; i < 3; i++) {
+      createLever(i, 'left');
+    }
+    // 右3本 (index 3,4,5)
+    for (let i = 3; i < 6; i++) {
+      createLever(i, 'right');
+    }
+  }
+
+  // レバー発射処理
+  function fireLever(lever, power) {
+    if (!coin.inPlay || coin.cleared || coin.failed) return;
+    if (!rebaData) return;
+
+    // そのレバーに対応する「当たり判定エリア」に10円が居るかチェック
+    // 簡易：盤面を左右に3分割して、それぞれ「レバーエリア」とみなす
+    const w = canvas.width;
+    const h = canvas.height;
+
+    const colWidth = w / 3;
+    let colIndex;
+    if (lever.side === 'left') {
+      // 左側3本を左から上中下の高さに分けている想定だが、
+      // ここでは横方向だけで簡易に判定：左側1/3を全て対象とする
+      colIndex = 0;
+    } else {
+      colIndex = 2;
+    }
+    const colXMin = colWidth * colIndex;
+    const colXMax = colWidth * (colIndex + 1);
+
+    // 縦方向は 3分割
+    const rowHeight = h / 3;
+    let rowIndex;
+    if (lever.side === 'left') {
+      rowIndex = lever.index;        // 0,1,2
+    } else {
+      rowIndex = lever.index - 3;    // 0,1,2
+    }
+    const rowYMin = rowHeight * rowIndex;
+    const rowYMax = rowHeight * (rowIndex + 1);
+
+    const inArea = (
+      coin.x >= colXMin && coin.x <= colXMax &&
+      coin.y >= rowYMin && coin.y <= rowYMax
+    );
+
+    if (!inArea) {
+      // 近くにないと空振り
+      return;
+    }
+
+    // 発射方向：レバー側 → 中央側（反対方向）
+    // 左レバーなら右向き、右レバーなら左向き
+    const dirX = (lever.side === 'left') ? 1 : -1;
+    const baseSpeed = 7;  // 最大威力時のベース速度（調整してOK）
+    const speed = baseSpeed * power;
+
+    // 10円に速度を加える（「弾く」）
+    coin.vx += dirX * speed;
+    // 少しだけ上にも弾く（台が縦でレールに沿って打ち上げるイメージ）
+    coin.vy -= speed * 0.4;
+
+    infoMsgEl.textContent = `レバー${lever.side === 'left' ? 'L' : 'R'} から発射！`;
+
+    // スライダー位置を戻す
+    lever.slider.value = '0';
+    lever.value = 0;
+    lever.stick.style.transform = 'translate(-50%, 0) rotate(0deg)';
+  }
+
+  // ==========================
+  // 描画
+  // ==========================
   function drawGame() {
     // 背景
     if (images.map) {
       ctx.drawImage(images.map, 0, 0, canvas.width, canvas.height);
     } else {
-      // フォールバック表示
       ctx.fillStyle = '#222';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = '#777';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(40, 40);
-      ctx.lineTo(canvas.width - 40, 120);
-      ctx.lineTo(40, 220);
-      ctx.lineTo(canvas.width - 60, 320);
-      ctx.lineTo(60, 400);
-      ctx.lineTo(canvas.width - 40, canvas.height - 60);
-      ctx.stroke();
     }
 
-    // 10円玉
+    // 10円
     if (coin.inPlay || coin.cleared || coin.failed) {
       ctx.save();
       ctx.translate(coin.x, coin.y);
-      const speed = Math.sqrt(coin.vx * coin.vx + coin.vy * coin.vy);
+      const speed = Math.sqrt(coin.vx*coin.vx + coin.vy*coin.vy);
       const rot = performance.now() * 0.005 * speed;
       ctx.rotate(rot);
 
-      const gradient = ctx.createRadialGradient(0, 0, coin.r * 0.2, 0, 0, coin.r);
-      gradient.addColorStop(0, '#ffe8a0');
-      gradient.addColorStop(1, '#c08a2a');
-      ctx.fillStyle = gradient;
+      const g = ctx.createRadialGradient(0,0,coin.r*0.2,0,0,coin.r);
+      g.addColorStop(0, '#ffe8a0');
+      g.addColorStop(1, '#c08a2a');
+      ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(0, 0, coin.r, 0, Math.PI * 2);
+      ctx.arc(0,0,coin.r,0,Math.PI*2);
       ctx.fill();
 
       ctx.fillStyle = '#5b3a10';
-      ctx.font = 'bold 12px system-ui';
+      ctx.font = 'bold 10px system-ui';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('10', 0, 0);
+      ctx.fillText('10',0,0);
 
       ctx.restore();
     }
@@ -719,36 +885,6 @@
     drawGame();
   }
 
-  // レバー操作：発射
-  shootRange.addEventListener('input', () => {
-    if (calcState() !== 'C') return;
-    const val = Number(shootRange.value);
-    if (!coin.inPlay && val >= 80) {
-      coin.inPlay = true;
-      coin.cleared = false;
-      coin.failed = false;
-      coin.x = canvas.width / 2;
-      coin.y = canvas.height - 60;
-      coin.vx = (Math.random() - 0.5) * 2;
-      coin.vy = -3.5;
-      infoMsgEl.textContent = '10円発射！傾きレバーで調整してね。';
-      touchAction();
-      shootRange.value = 0;
-    }
-  });
-
-  tiltRange.addEventListener('input', () => {
-    if (calcState() === 'C') {
-      touchAction();
-    }
-  });
-
-  // 初期化
-  loadAssets().then(() => {
-    resetCoin();
-    gameLoop();
-  });
-
   // ==========================
   // じゃんけん（仮）
   // ==========================
@@ -759,7 +895,7 @@
     const myHand = hands[Math.floor(Math.random() * 3)];
     const cpuHand = hands[Math.floor(Math.random() * 3)];
     let result;
-    if (myHand === cpuHand) result = 'あいこ';
+    if (myHand === cpuHand) result = '��いこ';
     else if (
       (myHand === 'グー' && cpuHand === 'チョキ') ||
       (myHand === 'チョキ' && cpuHand === 'パー') ||
@@ -767,6 +903,15 @@
     ) result = 'あなたの勝ち';
     else result = 'あなたの負け';
     jankenResult.textContent = `あなた：${myHand} / CPU：${cpuHand} → ${result}`;
+  });
+
+  // ==========================
+  // 初期化
+  // ==========================
+  setupLevers();
+  loadAssets().then(() => {
+    spawnCoinAtStart();
+    gameLoop();
   });
 
 </script>
