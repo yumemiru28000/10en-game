@@ -1,9 +1,8 @@
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>10円ゲーム 統合版（運営専用UI＋ドラッグ移動）</title>
+  <title>10円ゲーム 統合版（運営専用UI＋ドラッグ移動＋テストレール）</title>
   <style>
     body {
       margin: 0;
@@ -141,6 +140,13 @@
       font-size: 11px;
       color: #ccc;
     }
+
+    /* 表示だけ少しズーム（物理サイズ 282x521 はそのまま） */
+    #world canvas {
+      width: 110%;
+      height: auto;
+      transform: translateX(-5%);
+    }
   </style>
 </head>
 <body>
@@ -161,7 +167,7 @@
           <div id="leverLabel">レバー</div>
         </div>
         <div>
-          角度: <span id="angleText">0</span>° /
+          角度: <span id="angleText">0</span>�� /
           引き具合: <span id="powerText">0.00</span>
         </div>
 
@@ -245,6 +251,11 @@
 
     const engine = Engine.create();
     const world  = engine.world;
+
+    // ★ 解決反復回数を少し増やして安定させる
+    engine.positionIterations = 8;  // デフォルト6 → 8
+    engine.velocityIterations = 6;  // デフォルト4 → 6
+
     engine.world.gravity.y = 1.0;
 
     const canvasWidth  = window.innerWidth - 240;
@@ -320,6 +331,7 @@
     // ============================================================
     let worldInitialized = false;
     let leftWall, rightWall, ceiling, slopedFloor, cornerPost, gentleSlope;
+    let centerRail;   // ★ 中央テストレール
     const stickBodies = [];
     const coins = [];
 
@@ -362,7 +374,7 @@
       if (worldInitialized) return;
       worldInitialized = true;
 
-      // 壁
+      // --- 周囲の壁 ---
       const thickness = 40;
       leftWall = Bodies.rectangle(20, canvasHeight/2, thickness, canvasHeight, {
         isStatic: true,
@@ -377,7 +389,7 @@
         render: { fillStyle: "rgba(80,80,80,0.6)" }
       });
 
-      // 右下斜面と角
+      // --- 右下斜面と角 ---
       const bigFloorAngle = -Math.PI/8;
       const bigFloorLength = 500;
       slopedFloor = Bodies.rectangle(
@@ -402,7 +414,7 @@
         }
       );
 
-      // わずかな斜面
+      // --- ゆるい斜面 ---
       gentleSlope = Bodies.rectangle(
         canvasWidth/2,
         canvasHeight/2 + 80,
@@ -415,9 +427,23 @@
         }
       );
 
-      Composite.add(world, [leftWall, rightWall, ceiling, slopedFloor, cornerPost, gentleSlope]);
+      // --- ★ 中央テストレール ---
+      // 画面中央あたりに、水平な棒を1本追加
+      centerRail = Bodies.rectangle(
+        canvasWidth / 2,         // 中央X
+        canvasHeight / 2,        // 中央Y
+        220,                     // 長さ
+        8,                       // 太さ
+        {
+          isStatic: true,
+          angle: 0,
+          render: { fillStyle: "rgba(200,200,200,0.9)" }
+        }
+      );
 
-      // スポーンハンドル
+      Composite.add(world, [leftWall, rightWall, ceiling, slopedFloor, cornerPost, gentleSlope, centerRail]);
+
+      // --- スポーンハンドル（緑の丸） ---
       spawnHandleBody = Bodies.circle(spawnPos.x, spawnPos.y, SPAWN_HANDLE_RADIUS, {
         isStatic: false,
         isSensor: true,
@@ -427,17 +453,13 @@
           lineWidth: 1
         }
       });
-      Body.setInertia(spawnHandleBody, Infinity); // 回転しないように
+      Body.setInertia(spawnHandleBody, Infinity);
       Composite.add(world, spawnHandleBody);
 
       // 最初の10円1枚
       addCoinAt(spawnPos.x, spawnPos.y);
 
-      // 斜面補助力イベント
       cacheStaticBodies();
-      Events.on(engine, "beforeUpdate", applySlopeForces);
-
-      // マウスイベント（棒作成 & スポーンハンドルドラッグ）
       setupMouseEvents();
     }
 
@@ -578,16 +600,9 @@
     // スポーン位置のドラッグ
     // ============================================================
     function setupMouseEvents() {
-      // spawnHandleBody をドラッグで動かせるようにする
-      Events.on(mouseConstraint, "mousemove", () => {
-        // Matter の MouseConstraint が自動でドラッグしてくれるので、
-        // ここでは特に処理しなくても OK
-      });
-
       Events.on(mouseConstraint, "enddrag", event => {
         const body = event.body;
         if (body === spawnHandleBody) {
-          // ハンドルを離した位置をスポーン位置として保存
           spawnPos.x = spawnHandleBody.position.x;
           spawnPos.y = spawnHandleBody.position.y;
         }
@@ -621,7 +636,7 @@
           Composite.add(world, stick);
           stickBodies.push(stick);
           pendingPoint = null;
-          cacheStaticBodies(); // 斜面判定用に更新
+          cacheStaticBodies();
         }
       });
     }
@@ -694,7 +709,7 @@
     }
 
     Events.on(engine, "beforeUpdate", () => {
-      if (!isAdmin) return; // 運営モードでのみ物理補助も動かす
+      if (!isAdmin) return;
       applySlopeForces();
     });
 
@@ -721,6 +736,45 @@
       spawnPos.x = canvasWidth * 0.3;
       spawnPos.y = canvasHeight * 0.4;
       Body.setPosition(spawnHandleBody, spawnPos);
+    });
+
+    // ============================================================
+    // 描画ループ
+    // ============================================================
+    function drawGame() {
+      // Matter.Render に任せているので、ここで別描画はしていない
+    }
+
+    function gameLoop() {
+      requestAnimationFrame(gameLoop);
+      drawGame();
+    }
+
+    // ============================================================
+    // じゃんけん（仮）
+    // ============================================================
+    const jankenDummyBtn=document.getElementById('jankenDummyBtn');
+    const jankenResult=document.getElementById('jankenResult');
+    jankenDummyBtn.addEventListener('click',()=>{
+      const hands=['グー','チョキ','パー'];
+      const my=hands[Math.floor(Math.random()*3)];
+      const cpu=hands[Math.floor(Math.random()*3)];
+      let res;
+      if(my===cpu) res='あいこ';
+      else if(
+        (my==='グー'&&cpu==='チョキ')||
+        (my==='チョキ'&&cpu==='パー')||
+        (my==='パー'&&cpu==='グー')
+      ) res='あなたの勝ち'; else res='あなたの負け';
+      jankenResult.textContent=`あなた：${my} / CPU：${cpu} → ${res}`;
+    });
+
+    // ============================================================
+    // 初期化
+    // ============================================================
+    loadAssets().then(()=>{
+      spawnCoinAtSafeStart();
+      gameLoop();
     });
   </script>
 </body>
