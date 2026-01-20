@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>10円 vs ren輪郭 + kaisi（画像サイズ優先 + 縁取り棒）</title>
+  <meta charset="UTF-8" />
+  <title>線の設計図エディタ（描画→数値出力→再生成）</title>
   <style>
     body {
       margin: 0;
@@ -10,422 +10,340 @@
       color: #eee;
       font-family: sans-serif;
       display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 8px;
+      flex-direction: row;
+      height: 100vh;
+      overflow: hidden;
     }
-    #info {
+    #leftPanel {
+      width: 260px;
+      background: #111;
+      border-right: 1px solid #333;
+      padding: 8px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
       font-size: 12px;
-      margin-bottom: 4px;
+      overflow-y: auto;
     }
     #canvasWrapper {
-      position: relative;
-      border: 1px solid #555;
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
       background: #000;
     }
-    #controlPanel {
-      font-size: 12px;
-      margin-top: 8px;
+    #drawCanvas {
+      background: #111;
+      border: 1px solid #555;
+      touch-action: none; /* タッチでスクロールさせない */
+    }
+    textarea {
+      width: 100%;
+      height: 140px;
+      background: #000;
+      color: #0f0;
+      border: 1px solid #555;
+      font-family: monospace;
+      font-size: 11px;
+      box-sizing: border-box;
+      padding: 4px;
+    }
+    button {
+      font-size: 11px;
+      padding: 4px 8px;
+      background: #333;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 3px;
+      cursor: pointer;
+      margin: 2px 0;
+    }
+    button:hover {
+      background: #444;
+    }
+    .label {
+      font-size: 11px;
+      color: #ccc;
+    }
+    input[type="number"] {
+      width: 70px;
+      background: #222;
+      border: 1px solid #555;
+      color: #eee;
+      font-size: 11px;
+      padding: 2px 4px;
+      border-radius: 3px;
     }
   </style>
 </head>
 <body>
-  <div id="info">
-    ・map.png / ren.png / kaisi.png の実サイズをそのままキャンバスに使用（拡大縮小なし）。<br>
-    ・ren.png の黒と背景の「境目」ピクセルをすべて抽出し、その輪郭に沿って短い棒（線分チェーン）を自動生成。<br>
-    ・kaisi.png の黒いピクセルからランダムに10円（半径32px）を生成。<br>
-    ・10円は、ren の縁取り棒の上をサブステップ＋距離ベース判定で転がります。
+  <div id="leftPanel">
+    <div class="label"><strong>線の設計図エディタ</strong></div>
+    <div class="label">
+      1. 右のキャンバス上でドラッグして線を描く<br>
+      2. 「数値として出力」を押すと、0〜1に正規化された座標配列が下に出ます<br>
+      3. その配列をコードに貼り付けて保存できます<br>
+      4. 配列を貼って「この配列から再生成」で、同じ形が再描画されます
+    </div>
+
+    <div>
+      <span class="label">キャンバスサイズ</span><br>
+      W: <input id="canvasWidthInput" type="number" value="564" min="50" max="2000">
+      H: <input id="canvasHeightInput" type="number" value="1042" min="50" max="2000">
+      <button id="resizeCanvasBtn">変更</button>
+      <div class="label">※ map.png の実サイズなどに合わせるとよいです</div>
+    </div>
+
+    <div>
+      <span class="label">描画モード</span><br>
+      <button id="clearBtn">キャンバスをクリア</button>
+      <div class="label">マウス/タッチでドラッグすると線が描けます。</div>
+    </div>
+
+    <div>
+      <span class="label">数値出力（設計図）</span><br>
+      <button id="exportBtn">数値として出力</button>
+      <div class="label">形式: [[nx1,ny1],[nx2,ny2],...]（nx,ny は 0〜1 の比率）</div>
+      <textarea id="outputArea" readonly></textarea>
+    </div>
+
+    <div>
+      <span class="label">再生成（数値→線）</span><br>
+      <div class="label">ここに数値配列を貼り付けて「この配列から再生成」を押します。</div>
+      <textarea id="inputArea"></textarea>
+      <button id="importBtn">この配列から再生成</button>
+    </div>
   </div>
 
   <div id="canvasWrapper">
-    <canvas id="gameCanvas"></canvas>
-  </div>
-
-  <div id="controlPanel">
-    重力: <input id="gravityInput" type="number" step="0.1" value="0.5">
-    摩擦: <input id="frictionInput" type="number" step="0.01" value="0.02">
-    静止閾値: <input id="staticInput" type="number" step="0.01" value="0.02">
-    <button id="resetCoinBtn">10円リセット（kaisi黒から）</button>
-    <button id="playPauseBtn">一時停止</button>
+    <canvas id="drawCanvas" width="564" height="1042"></canvas>
   </div>
 
   <script>
-    const canvas = document.getElementById("gameCanvas");
+    const canvas = document.getElementById("drawCanvas");
     const ctx = canvas.getContext("2d");
-    const gravityInput = document.getElementById("gravityInput");
-    const frictionInput = document.getElementById("frictionInput");
-    const staticInput = document.getElementById("staticInput");
-    const resetCoinBtn = document.getElementById("resetCoinBtn");
-    const playPauseBtn = document.getElementById("playPauseBtn");
 
-    const MAP_URL   = "map.png";
-    const REN_URL   = "ren.png";
-    const KAISI_URL = "kaisi.png";
+    const canvasWidthInput  = document.getElementById("canvasWidthInput");
+    const canvasHeightInput = document.getElementById("canvasHeightInput");
+    const resizeCanvasBtn   = document.getElementById("resizeCanvasBtn");
 
-    const bgImage    = new Image();
-    const renImage   = new Image();
-    const kaisiImage = new Image();
-    let imagesLoaded = 0;
+    const clearBtn  = document.getElementById("clearBtn");
+    const exportBtn = document.getElementById("exportBtn");
+    const importBtn = document.getElementById("importBtn");
 
-    bgImage.src    = MAP_URL;
-    renImage.src   = REN_URL;
-    kaisiImage.src = KAISI_URL;
+    const outputArea = document.getElementById("outputArea");
+    const inputArea  = document.getElementById("inputArea");
 
-    bgImage.onload    = onImageLoaded;
-    renImage.onload   = onImageLoaded;
-    kaisiImage.onload = onImageLoaded;
+    // 線は「パスの配列」として保持する: paths = [ [ {x,y}, {x,y}, ... ], ... ]
+    let paths = [];
+    let currentPath = null;
+    let isDrawing = false;
 
-    const renCanvas   = document.createElement("canvas");
-    const renCtx      = renCanvas.getContext("2d");
-    let renData       = null;
+    // サンプリング間隔（px）：描画中あまり細かくしすぎない
+    const SAMPLE_DISTANCE = 4;
 
-    const kaisiCanvas = document.createElement("canvas");
-    const kaisiCtx    = kaisiCanvas.getContext("2d");
-    let kaisiData     = null;
-    let startPixels   = [];
-
-    let GRAVITY          = parseFloat(gravityInput.value) || 0.5;
-    let SLOPE_FRICTION   = parseFloat(frictionInput.value) || 0.02;
-    let STATIC_THRESHOLD = parseFloat(staticInput.value)   || 0.02;
-
-    gravityInput.addEventListener("input", () => {
-      GRAVITY = parseFloat(gravityInput.value) || GRAVITY;
-    });
-    frictionInput.addEventListener("input", () => {
-      SLOPE_FRICTION = parseFloat(frictionInput.value) || SLOPE_FRICTION;
-    });
-    staticInput.addEventListener("input", () => {
-      STATIC_THRESHOLD = parseFloat(staticInput.value) || STATIC_THRESHOLD;
-    });
-
-    const coin = {
-      x: 0,
-      y: 0,
-      vx: 0,
-      vy: 0,
-      r: 32
-    };
-
-    const slopes = []; // 縁取りから生成された短い棒たち
-
-    let paused = false;
-    playPauseBtn.addEventListener("click", () => {
-      paused = !paused;
-      playPauseBtn.textContent = paused ? "再生" : "一時停止";
-    });
-
-    resetCoinBtn.addEventListener("click", () => {
-      resetCoinFromKaisi();
-    });
-
-    function onImageLoaded() {
-      imagesLoaded++;
-      if (imagesLoaded === 3) {
-        initAfterImagesLoaded();
-      }
-    }
-
-    function initAfterImagesLoaded() {
-      const w = bgImage.naturalWidth  || bgImage.width;
-      const h = bgImage.naturalHeight || bgImage.height;
+    function setCanvasSize(w, h) {
       canvas.width  = w;
       canvas.height = h;
-
-      renCanvas.width  = w;
-      renCanvas.height = h;
-      renCtx.drawImage(renImage, 0, 0, w, h);
-      renData = renCtx.getImageData(0, 0, w, h);
-
-      kaisiCanvas.width  = w;
-      kaisiCanvas.height = h;
-      kaisiCtx.drawImage(kaisiImage, 0, 0, w, h);
-      kaisiData = kaisiCtx.getImageData(0, 0, w, h);
-
-      extractOutlineSlopesFromRen();
-      extractStartPixelsFromKaisi();
-
-      resetCoinFromKaisi();
-      loop();
+      redrawAll();
     }
 
-    function isBlackAt(imgData, x, y) {
-      if (!imgData) return false;
-      const ix = Math.floor(x), iy = Math.floor(y);
-      if (ix < 0 || iy < 0 || ix >= imgData.width || iy >= imgData.height) return false;
-      const idx = (iy * imgData.width + ix) * 4;
-      const r = imgData.data[idx], g = imgData.data[idx+1], b = imgData.data[idx+2], a = imgData.data[idx+3];
-      return a > 20 && r < 40 && g < 40 && b < 40;
-    }
+    resizeCanvasBtn.addEventListener("click", () => {
+      const w = Math.max(50, Math.min(2000, parseInt(canvasWidthInput.value, 10)  || canvas.width));
+      const h = Math.max(50, Math.min(2000, parseInt(canvasHeightInput.value, 10) || canvas.height));
+      setCanvasSize(w, h);
+    });
 
-    // 黒→背景の「境界ドット」を検出し、その輪郭に沿って棒チェーンを作る
-    function extractOutlineSlopesFromRen() {
-      slopes.length = 0;
-      if (!renData) return;
+    clearBtn.addEventListener("click", () => {
+      paths = [];
+      currentPath = null;
+      redrawAll();
+      outputArea.value = "";
+    });
 
-      const w = renData.width;
-      const h = renData.height;
-
-      // 1. 黒マップ & 境界マップ
-      const isBlackMap   = new Uint8Array(w * h);
-      const isBorderMap  = new Uint8Array(w * h);
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const idx = y*w + x;
-          if (isBlackAt(renData, x, y)) {
-            isBlackMap[idx] = 1;
-          }
-        }
-      }
-
-      const neigh4 = [
-        [ 1,  0], [-1,  0],
-        [ 0,  1], [ 0, -1]
-      ];
-
-      // 黒で、かつ4近傍のどこかが非黒なら「境界」
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const idx = y*w + x;
-          if (!isBlackMap[idx]) continue;
-          let isBorder = false;
-          for (const [dx, dy] of neigh4) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx < 0 || ny < 0 || nx >= w || ny >= h) {
-              isBorder = true;
-              break;
-            }
-            const nidx = ny*w + nx;
-            if (!isBlackMap[nidx]) {
-              isBorder = true;
-              break;
-            }
-          }
-          if (isBorder) {
-            isBorderMap[idx] = 1;
-          }
-        }
-      }
-
-      // 2. 境界ドットの連結成分（輪郭）ごとに棒チェーン化
-      const visited = new Uint8Array(w*h);
-      const neigh8 = [
-        [ 1,  0], [-1,  0],
-        [ 0,  1], [ 0, -1],
-        [ 1,  1], [ 1, -1],
-        [-1,  1], [-1, -1]
-      ];
-
-      function bfsOutline(sx, sy) {
-        const q = [[sx, sy]];
-        const pixels = [];
-        visited[sy*w + sx] = 1;
-        while (q.length) {
-          const [x, y] = q.shift();
-          pixels.push({ x, y });
-          for (const [dx, dy] of neigh8) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-            const idx = ny*w + nx;
-            if (!isBorderMap[idx] || visited[idx]) continue;
-            visited[idx] = 1;
-            q.push([nx, ny]);
-          }
-        }
-        return pixels;
-      }
-
-      const MIN_OUTLINE_PIXELS = 10;   // 輪郭ノイズ除去
-      const SEGMENT_STEP       = 6;    // 何ドットごとに折れ点を作るか
-
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const idx = y*w + x;
-          if (!isBorderMap[idx] || visited[idx]) continue;
-          const outline = bfsOutline(x, y);
-          if (outline.length < MIN_OUTLINE_PIXELS) continue; // 小さいノイズ輪郭は無視
-
-          // 輪郭のピクセル配列 outline を、順番近似としてそのまま使う
-          // 一定ステップごとに点を間引きして短い線分チェーンにする
-          for (let i = 0; i < outline.length - SEGMENT_STEP; i += SEGMENT_STEP) {
-            const p1 = outline[i];
-            const p2 = outline[i + SEGMENT_STEP];
-            const dx = p2.x - p1.x;
-            const dy = p2.y - p1.y;
-            const len = Math.sqrt(dx*dx + dy*dy);
-            if (len < 4) continue; // 短すぎるセグメントは無視
-            slopes.push({
-              x1: p1.x,
-              y1: p1.y,
-              x2: p2.x,
-              y2: p2.y
-            });
-          }
-        }
-      }
-
-      console.log("ren 縁取りから生成された棒の本数:", slopes.length);
-    }
-
-    function extractStartPixelsFromKaisi() {
-      startPixels = [];
-      if (!kaisiData) return;
-      const w = kaisiData.width;
-      const h = kaisiData.height;
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          if (isBlackAt(kaisiData, x, y)) {
-            startPixels.push({ x, y });
-          }
-        }
-      }
-      console.log("kaisi 黒ピクセル数:", startPixels.length);
-    }
-
-    function resetCoinFromKaisi() {
-      if (!startPixels.length) {
-        coin.x = canvas.width/2;
-        coin.y = 50;
+    function getCanvasPos(e) {
+      const rect = canvas.getBoundingClientRect();
+      let clientX, clientY;
+      if (e.touches && e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
       } else {
-        const idx = Math.floor(Math.random() * startPixels.length);
-        const { x, y } = startPixels[idx];
-        coin.x = x;
-        coin.y = y - coin.r * 0.3;
+        clientX = e.clientX;
+        clientY = e.clientY;
       }
-      coin.vx = 0;
-      coin.vy = 0;
+      const x = (clientX - rect.left);
+      const y = (clientY - rect.top);
+      return { x, y };
     }
 
-    function updatePhysics() {
-      if (paused) return;
-      if (!renData) return;
+    let lastSamplePos = null;
 
-      const SUB_STEPS = 4;
-      const dt = 1 / SUB_STEPS;
+    function startDrawing(e) {
+      e.preventDefault();
+      const pos = getCanvasPos(e);
+      isDrawing = true;
+      currentPath = [pos];
+      lastSamplePos = pos;
+      redrawAll();
+    }
 
-      for (let i = 0; i < SUB_STEPS; i++) {
-        coin.vy += GRAVITY * dt;
-        coin.x += coin.vx * dt;
-        coin.y += coin.vy * dt;
-
-        resolveCollisionsWithSlopes(dt);
-      }
-
-      const bounce = 0.3;
-      if (coin.x - coin.r < 0) {
-        coin.x = coin.r;
-        if (coin.vx < 0) coin.vx *= -bounce;
-      }
-      if (coin.x + coin.r > canvas.width) {
-        coin.x = canvas.width - coin.r;
-        if (coin.vx > 0) coin.vx *= -bounce;
-      }
-      if (coin.y - coin.r < 0) {
-        coin.y = coin.r;
-        if (coin.vy < 0) coin.vy *= -bounce;
-      }
-      if (coin.y + coin.r > canvas.height) {
-        coin.y = canvas.height - coin.r;
-        if (coin.vy > 0) coin.vy *= -bounce;
+    function moveDrawing(e) {
+      if (!isDrawing || !currentPath) return;
+      e.preventDefault();
+      const pos = getCanvasPos(e);
+      const dx = pos.x - lastSamplePos.x;
+      const dy = pos.y - lastSamplePos.y;
+      const dist2 = dx*dx + dy*dy;
+      if (dist2 >= SAMPLE_DISTANCE * SAMPLE_DISTANCE) {
+        currentPath.push(pos);
+        lastSamplePos = pos;
+        redrawAll();
       }
     }
 
-    function resolveCollisionsWithSlopes(dt) {
-      for (const s of slopes) {
-        const { px, py, d } = closestPointOnSegment(
-          s.x1, s.y1, s.x2, s.y2,
-          coin.x, coin.y
-        );
-        if (d >= coin.r) continue;
-
-        const dx = s.x2 - s.x1;
-        const dy = s.y2 - s.y1;
-        const len = Math.sqrt(dx*dx + dy*dy) || 1;
-        const tx = dx / len;
-        const ty = dy / len;
-        const nx = -ty;
-        const ny =  tx;
-
-        const penetration = coin.r - d;
-        coin.x += nx * (penetration + 0.2);
-        coin.y += ny * (penetration + 0.2);
-
-        const vpx = coin.vx;
-        const vpy = coin.vy;
-        const v_parallel = vpx * tx + vpy * ty;
-        let v_normal   = vpx * nx + vpy * ny;
-
-        v_normal = 0;
-
-        const g_parallel = GRAVITY * ty * dt;
-        let new_v_parallel = v_parallel + g_parallel;
-
-        if (Math.abs(g_parallel) < STATIC_THRESHOLD * dt &&
-            Math.abs(v_parallel) < STATIC_THRESHOLD) {
-          new_v_parallel = 0;
-        } else {
-          new_v_parallel *= (1 - SLOPE_FRICTION);
-        }
-
-        coin.vx = new_v_parallel * tx + v_normal * nx;
-        coin.vy = new_v_parallel * ty + v_normal * ny;
+    function endDrawing(e) {
+      if (!isDrawing) return;
+      e.preventDefault();
+      isDrawing = false;
+      if (currentPath && currentPath.length > 1) {
+        paths.push(currentPath);
       }
+      currentPath = null;
+      lastSamplePos = null;
+      redrawAll();
     }
 
-    function closestPointOnSegment(ax, ay, bx, by, cx, cy) {
-      const abx = bx - ax;
-      const aby = by - ay;
-      const acx = cx - ax;
-      const acy = cy - ay;
-      const abLen2 = abx*abx + aby*aby || 1;
-      let t = (acx * abx + acy * aby) / abLen2;
-      t = Math.max(0, Math.min(1, t));
-      const px = ax + abx * t;
-      const py = ay + aby * t;
-      const dx = cx - px;
-      const dy = cy - py;
-      const d = Math.sqrt(dx*dx + dy*dy);
-      return { px, py, d, t };
-    }
+    // マウス
+    canvas.addEventListener("mousedown", startDrawing);
+    window.addEventListener("mousemove", moveDrawing);
+    window.addEventListener("mouseup",   endDrawing);
 
-    function draw() {
-      if (!bgImage.complete) return;
+    // タッチ
+    canvas.addEventListener("touchstart", startDrawing, { passive: false });
+    window.addEventListener("touchmove",  moveDrawing,  { passive: false });
+    window.addEventListener("touchend",   endDrawing,   { passive: false });
 
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
-
-      // ren 縁取りから作られた棒
-      ctx.strokeStyle = "#44aaff";
-      ctx.lineWidth = 2;
-      for (const s of slopes) {
+    function redrawAll() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // 背景グリッド（薄く）
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = 1;
+      const gridStep = 50;
+      for (let x = 0; x <= canvas.width; x += gridStep) {
         ctx.beginPath();
-        ctx.moveTo(s.x1, s.y1);
-        ctx.lineTo(s.x2, s.y2);
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= canvas.height; y += gridStep) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
         ctx.stroke();
       }
 
-      // 10円
-      ctx.save();
-      ctx.translate(coin.x, coin.y);
-      ctx.fillStyle = "#cc8844";
-      ctx.beginPath();
-      ctx.arc(0,0,coin.r,0,Math.PI*2);
-      ctx.fill();
-      ctx.fillStyle = "#5b3a10";
-      ctx.font = "bold 16px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("10",0,0);
-      ctx.restore();
+      // 既存パス
+      ctx.strokeStyle = "#0ff";
+      ctx.lineWidth = 3;
+      ctx.lineJoin = "round";
+      ctx.lineCap  = "round";
+      for (const path of paths) {
+        if (path.length < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(path[0].x, path[0].y);
+        for (let i = 1; i < path.length; i++) {
+          ctx.lineTo(path[i].x, path[i].y);
+        }
+        ctx.stroke();
+      }
+
+      // 描画中のパス
+      if (currentPath && currentPath.length >= 2) {
+        ctx.strokeStyle = "#ff0";
+        ctx.beginPath();
+        ctx.moveTo(currentPath[0].x, currentPath[0].y);
+        for (let i = 1; i < currentPath.length; i++) {
+          ctx.lineTo(currentPath[i].x, currentPath[i].y);
+        }
+        ctx.stroke();
+      }
     }
 
-    function loop() {
-      requestAnimationFrame(loop);
-      if (!renData || !kaisiData) return;
-      updatePhysics();
-      draw();
+    // 描画済みの paths を [ [nx,ny], ... ] の配列(パスごとの配列)に変換
+    function exportPaths() {
+      const w = canvas.width;
+      const h = canvas.height;
+      // paths: [ [ {x,y},... ], [ ... ], ... ]
+      const exported = paths.map(path => {
+        return path.map(p => {
+          const nx = +(p.x / w).toFixed(4); // 0〜1 の比率
+          const ny = +(p.y / h).toFixed(4);
+          return [nx, ny];
+        });
+      });
+      return exported;
     }
+
+    exportBtn.addEventListener("click", () => {
+      const data = exportPaths();
+      // コードにそのまま貼れる形（JSON）
+      outputArea.value = JSON.stringify(data);
+      // コピーしやすいよう選択しておくのもアリ
+      outputArea.focus();
+      outputArea.select();
+    });
+
+    // 入力された配列から paths を再構築
+    function importPathsFromText(text) {
+      let arr;
+      try {
+        arr = JSON.parse(text);
+      } catch (e) {
+        alert("JSON のパースに失敗しました。形式を確認してください。");
+        return;
+      }
+      if (!Array.isArray(arr)) {
+        alert("最上位が配列ではありません。[[[nx,ny],...], ...] の形式にしてください。");
+        return;
+      }
+
+      const w = canvas.width;
+      const h = canvas.height;
+      const newPaths = [];
+      for (const path of arr) {
+        if (!Array.isArray(path)) continue;
+        const pts = [];
+        for (const p of path) {
+          if (!Array.isArray(p) || p.length < 2) continue;
+          const nx = Number(p[0]);
+          const ny = Number(p[1]);
+          if (Number.isNaN(nx) || Number.isNaN(ny)) continue;
+          pts.push({
+            x: nx * w,
+            y: ny * h
+          });
+        }
+        if (pts.length >= 2) {
+          newPaths.push(pts);
+        }
+      }
+      paths = newPaths;
+      currentPath = null;
+      redrawAll();
+    }
+
+    importBtn.addEventListener("click", () => {
+      const text = inputArea.value.trim();
+      if (!text) {
+        alert("数値配列を貼り付けてください。");
+        return;
+      }
+      importPathsFromText(text);
+    });
+
+    // 初回描画
+    redrawAll();
   </script>
 </body>
 </html>
