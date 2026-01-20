@@ -262,6 +262,7 @@
   let dragging=false;
   let dragStart=null;
   let dragNow=null;
+  let activeSpring=null; // ドラッグ中のバネ
 
   function setStatus(lines){
     statusEl.textContent = lines.join("\n");
@@ -563,6 +564,115 @@
       }
     });
 
+    // ゲージとドラッグ線の描画
+    Events.on(render, "afterRender", () => {
+      const canvas = render.canvas;
+      const context = render.context;
+
+      // ドラッグ中のガイド線とゲージ表示
+      if (dragging && activeSpring && dragStart && dragNow) {
+        const dx = dragNow.x - dragStart.x;
+        const dy = dragNow.y - dragStart.y;
+        const dist = Math.hypot(dx, dy);
+        const maxPull = 140;
+        const power01 = Math.max(0, Math.min(1, dist / maxPull));
+
+        // ドラッグ線（バネの中心から引っ張り点へ）
+        context.save();
+        context.strokeStyle = "rgba(255, 200, 0, 0.8)";
+        context.lineWidth = 3;
+        context.setLineDash([5, 5]);
+        context.beginPath();
+        context.moveTo(activeSpring.center.x, activeSpring.center.y);
+        context.lineTo(dragNow.x, dragNow.y);
+        context.stroke();
+        context.setLineDash([]);
+
+        // ゲージバーをバネの横に表示
+        const gaugeX = activeSpring.center.x + (activeSpring.dir > 0 ? 60 : -140);
+        const gaugeY = activeSpring.center.y - 20;
+        const gaugeWidth = 80;
+        const gaugeHeight = 15;
+
+        // 背景（枠）
+        context.fillStyle = "rgba(0, 0, 0, 0.7)";
+        context.fillRect(gaugeX, gaugeY, gaugeWidth, gaugeHeight);
+        context.strokeStyle = "rgba(255, 255, 255, 0.8)";
+        context.lineWidth = 2;
+        context.strokeRect(gaugeX, gaugeY, gaugeWidth, gaugeHeight);
+
+        // パワーバー（グラデーション）
+        const fillWidth = gaugeWidth * power01;
+        const gradient = context.createLinearGradient(gaugeX, 0, gaugeX + gaugeWidth, 0);
+        if (power01 < 0.5) {
+          gradient.addColorStop(0, "#00ff00");
+          gradient.addColorStop(1, "#ffff00");
+        } else if (power01 < 0.9) {
+          gradient.addColorStop(0, "#ffff00");
+          gradient.addColorStop(1, "#ff8800");
+        } else {
+          gradient.addColorStop(0, "#ff8800");
+          gradient.addColorStop(1, "#ff0000");
+        }
+        context.fillStyle = gradient;
+        context.fillRect(gaugeX, gaugeY, fillWidth, gaugeHeight);
+
+        // 限界マーク（90%の位置）
+        const limitX = gaugeX + gaugeWidth * 0.9;
+        context.strokeStyle = "rgba(255, 0, 0, 0.9)";
+        context.lineWidth = 2;
+        context.beginPath();
+        context.moveTo(limitX, gaugeY);
+        context.lineTo(limitX, gaugeY + gaugeHeight);
+        context.stroke();
+
+        // パワー値テキスト
+        context.fillStyle = "#fff";
+        context.font = "12px sans-serif";
+        context.textAlign = "center";
+        const powerPercent = Math.floor(power01 * 100);
+        context.fillText(`${powerPercent}%`, gaugeX + gaugeWidth / 2, gaugeY - 5);
+
+        // 限界超え警告
+        if (power01 >= 0.9) {
+          context.fillStyle = "#ff0000";
+          context.font = "bold 14px sans-serif";
+          context.fillText("MAX!", gaugeX + gaugeWidth / 2, gaugeY + gaugeHeight + 18);
+        }
+
+        context.restore();
+      }
+
+      // バネエリアのハイライト（コインがバネ範囲内にいる場合）
+      if (coin && !dragging) {
+        for (const s of springs) {
+          if (coinInsideSpring(s)) {
+            context.save();
+            context.strokeStyle = "rgba(255, 255, 0, 0.6)";
+            context.lineWidth = 3;
+            context.setLineDash([10, 5]);
+            const a = s.aabb;
+            context.strokeRect(a.minX, a.minY, a.maxX - a.minX, a.maxY - a.minY);
+            
+            // 方向インジケーター（矢印）
+            const arrowX = s.center.x;
+            const arrowY = s.center.y - 30;
+            
+            context.fillStyle = "rgba(255, 255, 0, 0.8)";
+            context.font = "bold 16px sans-serif";
+            context.textAlign = "center";
+            if (s.dir > 0) {
+              context.fillText("→", arrowX, arrowY);
+            } else {
+              context.fillText("←", arrowX, arrowY);
+            }
+            
+            context.restore();
+          }
+        }
+      }
+    });
+
     // レバー（マウ���）
     const canvas = () => render && render.canvas;
 
@@ -576,6 +686,7 @@
       const s = nearestAvailableSpring();
       if (!s) return;
 
+      activeSpring = s; // アクティブなバネを記録
       dragging = true;
       dragStart = getMousePos(e);
       dragNow = {...dragStart};
@@ -590,7 +701,8 @@
       if (!dragging) return;
       dragging = false;
 
-      const s = nearestAvailableSpring();
+      const s = activeSpring; // 記録していたバネを使用
+      activeSpring = null; // リセット
       if (!s) return;
 
       const dx = dragNow.x - dragStart.x;
