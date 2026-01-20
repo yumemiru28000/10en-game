@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>10円ゲーム + マップ + 運営モード</title>
+  <title>10円ゲーム 実験マップ＋レバー＋編集棒</title>
   <style>
     body {
       margin: 0;
@@ -16,7 +16,7 @@
     }
 
     #uiPanel {
-      width: 190px;
+      width: 200px;
       background: #111;
       border-right: 1px solid #333;
       padding: 8px;
@@ -38,6 +38,7 @@
       touch-action: none;
     }
 
+    /* レバー UI （「L」の形） */
     #lever {
       position: absolute;
       width: 12px;
@@ -76,8 +77,15 @@
       line-height: 1.5;
     }
 
-    #world {
+    #worldContainer {
       flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #world {
+      width: 100%;
+      height: 100%;
     }
 
     button {
@@ -92,7 +100,8 @@
     button:hover {
       background: #444;
     }
-    input[type="number"], input[type="password"] {
+    input[type="number"],
+    input[type="password"] {
       width: 70px;
       background: #222;
       border: 1px solid #555;
@@ -101,7 +110,24 @@
       border-radius: 3px;
     }
     label {
+      display: block;
+      margin-top: 4px;
+    }
+
+    #adminStatus {
       font-size: 11px;
+      color: #ccc;
+    }
+
+    #worldOverlay {
+      /* 編集モードのためのクリック用透明レイヤー */
+      position: absolute;
+      inset: 0;
+      pointer-events: none; /* 運営モードのときだけ有効化する */
+    }
+    #worldOverlay.editing {
+      pointer-events: auto;
+      cursor: crosshair;
     }
   </style>
 </head>
@@ -121,67 +147,88 @@
     </div>
     <div>
       <button id="addCoin">10円を置く</button>
-      <button id="resetWorld">リセット</button>
+      <button id="resetWorld">10円リセット</button>
     </div>
-    <div style="font-size:11px; color:#aaa; margin-top:4px;">
-      操作:<br>
-      ・レバーをドラッグで時計回り最大90°<br>
-      ・離すと、近くの10円を指定方向へ発射
-    </div>
-    <hr style="border-color:#333;">
-    <div style="font-size:11px;">
-      <b>運営モード</b><br>
-      パスワード: <input id="adminPass" type="password" value="">
-      <button id="adminToggle">OFF</button><br>
-      <span id="adminStatus" style="color:#a55;">運営モード: OFF</span><br>
-      （ON 中はキャンバスクリックで棒を追加）
+
+    <hr style="border-color:#333; border-style:solid; border-width:1px 0 0 0;">
+
+    <!-- 運営モード -->
+    <div>
+      <strong>運営モード</strong><br>
+      <label>
+        パスワード:
+        <input id="adminPass" type="password">
+      </label>
+      <button id="adminLogin">ON/OFF</button>
+      <div id="adminStatus">状態: 一般ユーザー</div>
+
+      <label>
+        棒の太さ:
+        <input id="barThickness" type="number" value="10" step="1">
+      </label>
+      <button id="toggleEditBar">棒編集モード</button>
+      <button id="resetBars">棒すべてリセット</button>
+
+      <div style="font-size:11px; color:#aaa; margin-top:4px;">
+        棒編集モード中:<br>
+        画面をクリックして点を2回打つと棒ができます。<br>
+        再度ボタンでOFF。
+      </div>
     </div>
   </div>
 
-  <div id="world"></div>
+  <div id="worldContainer">
+    <!-- Matter.js がここに描画 -->
+    <div id="world"></div>
+    <!-- 棒編集用の透明レイヤー -->
+    <canvas id="worldOverlay"></canvas>
+  </div>
 
   <!-- Matter.js -->
   <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
   <script>
     // ============================================================
-    // 設定用定数
+    // マップ画像のベース URL
     // ============================================================
     const base = "https://raw.githubusercontent.com/yumemiru28000/10en-game/main";
+    const mapImageUrl = base + "/map.png";
 
-    // レバーの重さ（引きにくさ）
-    const REBA_HEAVINESS_EXPONENT = 3.0;
+    // ============================================================
+    // レバー／発射／物理パラメータ
+    // ============================================================
+    const REBA_HEAVINESS_EXPONENT = 3.5;     // 引くほどかなり重く
     const REBA_MAX_ANGLE_DEG = 90;
-    const REBA_LAUNCH_ANGLE_DEG = -45;
-    const REBA_MAX_LAUNCH_SPEED = 30;
+    const REBA_LAUNCH_ANGLE_DEG = -45;       // 右上方向へ
+    const REBA_MAX_LAUNCH_SPEED = 30;        // 最大速度（大きくすると強く飛ぶ）
     const REBA_DRAG_SENSITIVITY = 0.5;
     const REBA_LAUNCH_RADIUS = 30;
 
     const COIN_RADIUS = 11;
-    const COIN_MASS = 0.0055;
+    const COIN_MASS   = 0.0055;              // 5.5g
 
-    const REBA_TEST_SLOPE_ANGLE = 0.05;
+    // コインが転がりやすいように摩擦・反発を調整
+    const COIN_RESTITUTION = 0.2;            // あまりピョンピョンしない
+    const COIN_FRICTION = 0.05;              // 低め
+    const COIN_FRICTION_STATIC = 0.03;       // 静止摩擦をかなり小さく → ゆっくりでも転がりやすい
+    const COIN_FRICTION_AIR = 0.001;         // 空気抵抗低め
 
-    const REBA_LAUNCH_BASE_X = 260;
-    const REBA_LAUNCH_BASE_Y = 420;
+    // 発射台の���標
+    const REBA_LAUNCH_BASE_X = 250;
+    const REBA_LAUNCH_BASE_Y = 400;
 
-    // 管理用パスワード
+    // ============================================================
+    // 運営モード
+    // ============================================================
     const ADMIN_PASSWORD = "1122";
+    let isAdmin = false;
+    let isEditBarMode = false;
 
-    // ============================================================
-    // 画像読み込みユーティリティ
-    // ============================================================
-    const images = {};
-    function loadImage(id, src) {
-      return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-          images[id] = img;
-          resolve(img);
-        };
-        img.onerror = reject;
-        img.src = src;
-      });
-    }
+    const adminPassInput = document.getElementById("adminPass");
+    const adminLoginBtn = document.getElementById("adminLogin");
+    const adminStatusEl = document.getElementById("adminStatus");
+    const toggleEditBarBtn = document.getElementById("toggleEditBar");
+    const resetBarsBtn = document.getElementById("resetBars");
+    const barThicknessInput = document.getElementById("barThickness");
 
     // ============================================================
     // Matter.js 基本セットアップ
@@ -194,11 +241,12 @@
     const Body = Matter.Body;
 
     const engine = Engine.create();
-    const world = engine.world;
+    const world  = engine.world;
     engine.world.gravity.y = 1.0;
 
-    const canvasWidth = window.innerWidth - 190;
-    const canvasHeight = window.innerHeight;
+    const worldContainer = document.getElementById("worldContainer");
+    const canvasWidth  = worldContainer.clientWidth;
+    const canvasHeight = worldContainer.clientHeight;
 
     const render = Render.create({
       element: document.getElementById('world'),
@@ -210,166 +258,68 @@
         background: '#222'
       }
     });
-
-    // Matter.js が内部で使っている canvas を取得し、背景に map.png を描画する
-    const renderCanvas = render.canvas;
-    const renderContext = render.context;
-
-    // オリジナルの render 関数をラップして背景画像を描画
-    const originalRenderWorld = Render.world;
-    Render.world = function(engine) {
-      const world = engine.world;
-      const ctx = renderContext;
-      const canvas = renderCanvas;
-
-      // まず背景クリア
-      ctx.fillStyle = "#222";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // map.png があれば背景として描画
-      const mapImg = images["map"];
-      if (mapImg) {
-        // キャンバス全体にフィットさせる簡易版（縦横比は無視）
-        ctx.drawImage(mapImg, 0, 0, canvas.width, canvas.height);
-      }
-
-      // その上に Matter.js のオブジェクト描画
-      originalRenderWorld.call(Render, engine);
-    };
-
     Render.run(render);
     const runner = Runner.create();
     Runner.run(runner, engine);
 
+    // 背景にマップ画像を貼る
+    const bgImg = new Image();
+    bgImg.src = mapImageUrl;
+    bgImg.onload = () => {
+      render.options.hasBounds = true;
+      // Matter.js の canvas 背景に直接描く簡易方法
+      const ctx = render.context;
+      const drawBackground = () => {
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0); // リセット
+        ctx.drawImage(bgImg, 0, 0, canvasWidth, canvasHeight);
+        ctx.restore();
+      };
+      // beforeRender で背景を先に描画
+      Matter.Events.on(render, "beforeRender", () => {
+        drawBackground();
+      });
+    };
+
     // ============================================================
-    // 壁 / 地面 / 斜面
+    // 基本フィールド（少しだけ囲い）
     // ============================================================
     const thickness = 40;
+
     const leftWall = Bodies.rectangle(20, canvasHeight / 2, thickness, canvasHeight, {
       isStatic: true,
-      render: { fillStyle: "rgba(50,50,50,0.6)" }
+      render: { fillStyle: "rgba(0,0,0,0)" } // 透明気味
     });
     const rightWall = Bodies.rectangle(canvasWidth - 20, canvasHeight / 2, thickness, canvasHeight, {
       isStatic: true,
-      render: { fillStyle: "rgba(50,50,50,0.6)" }
+      render: { fillStyle: "rgba(0,0,0,0)" }
+    });
+    const floor = Bodies.rectangle(canvasWidth / 2, canvasHeight - 20, canvasWidth, thickness, {
+      isStatic: true,
+      render: { fillStyle: "rgba(0,0,0,0)" }
     });
     const ceiling = Bodies.rectangle(canvasWidth / 2, 20, canvasWidth, thickness, {
       isStatic: true,
-      render: { fillStyle: "rgba(50,50,50,0.6)" }
+      render: { fillStyle: "rgba(0,0,0,0)" }
     });
 
-    const floorAngle = -Math.PI / 8;
-    const floorLength = 500;
-    const slopedFloor = Bodies.rectangle(
-      canvasWidth - 260,
-      canvasHeight - 60,
-      floorLength,
-      20,
-      {
-        isStatic: true,
-        angle: floorAngle,
-        render: { fillStyle: "rgba(100,100,100,0.7)" }
-      }
-    );
-
-    const cornerPost = Bodies.rectangle(
-      canvasWidth - 350,
-      canvasHeight - 150,
-      20,
-      80,
-      {
-        isStatic: true,
-        render: { fillStyle: "rgba(150,150,150,0.8)" }
-      }
-    );
-
-    const gentleSlope = Bodies.rectangle(
-      canvasWidth / 2,
-      canvasHeight / 2 + 80,
-      350,
-      10,
-      {
-        isStatic: true,
-        angle: REBA_TEST_SLOPE_ANGLE,
-        render: { fillStyle: "rgba(90,90,90,0.7)" }
-      }
-    );
-
-    Composite.add(world, [leftWall, rightWall, ceiling, slopedFloor, cornerPost, gentleSlope]);
+    Composite.add(world, [leftWall, rightWall, floor, ceiling]);
 
     // ============================================================
-    // 棒（運営モードで追加できる）
-    // ============================================================
-    const BAR_STORAGE_KEY = "10en-game-bars-v1";
-    const bars = [];
-
-    function createBar(x, y, width = 120, height = 10, angleDeg = 0) {
-      const bar = Bodies.rectangle(x, y, width, height, {
-        isStatic: true,
-        angle: angleDeg * Math.PI / 180,
-        render: { fillStyle: "rgba(200,200,200,0.9)" }
-      });
-      bars.push({
-        body: bar,
-        x, y, width, height, angleDeg
-      });
-      Composite.add(world, bar);
-      saveBars();
-    }
-
-    function saveBars() {
-      const data = bars.map(b => ({
-        x: b.body.position.x,
-        y: b.body.position.y,
-        width: b.width,
-        height: b.height,
-        angleDeg: b.angleDeg
-      }));
-      localStorage.setItem(BAR_STORAGE_KEY, JSON.stringify(data));
-    }
-
-    function loadBars() {
-      const json = localStorage.getItem(BAR_STORAGE_KEY);
-      if (!json) return;
-      try {
-        const arr = JSON.parse(json);
-        arr.forEach(b => {
-          const bar = Bodies.rectangle(
-            b.x,
-            b.y,
-            b.width,
-            b.height,
-            {
-              isStatic: true,
-              angle: b.angleDeg * Math.PI / 180,
-              render: { fillStyle: "rgba(200,200,200,0.9)" }
-            }
-          );
-          bars.push({ body: bar, ...b });
-          Composite.add(world, bar);
-        });
-      } catch (e) {
-        console.error("Failed to load bars", e);
-      }
-    }
-
-    loadBars();
-
-    // ============================================================
-    // 10円玉（摩擦を小さくしてよく転がるように）
+    // 10円玉
     // ============================================================
     const coins = [];
 
     function createCoin(x, y) {
       return Bodies.circle(x, y, COIN_RADIUS, {
         mass: COIN_MASS,
-        restitution: 0.3,
-        friction: 0.02,        // 小さめ
-        frictionStatic: 0.05,  // かなり小さめ -> 斜面で止まりにくい
-        frictionAir: 0.0015,
+        restitution: COIN_RESTITUTION,
+        friction: COIN_FRICTION,
+        frictionStatic: COIN_FRICTION_STATIC,
+        frictionAir: COIN_FRICTION_AIR,
         render: {
-          fillStyle: "#cc8844",
-          strokeStyle: "#ddbb77",
+          fillStyle: '#cc8844',
+          strokeStyle: '#ddbb77',
           lineWidth: 2
         }
       });
@@ -382,9 +332,12 @@
       return c;
     }
 
+    // 初期の10円：発射台付近に1枚
     addCoinAt(REBA_LAUNCH_BASE_X, REBA_LAUNCH_BASE_Y);
 
-    // 発射台の見た目
+    // ============================================================
+    // 発射台の見た目（スリットなど）
+    // ============================================================
     const blockThickness = 20;
     const baseBlockWidth = 80;
 
@@ -393,41 +346,44 @@
       REBA_LAUNCH_BASE_Y - COIN_RADIUS - 5,
       baseBlockWidth,
       blockThickness,
-      { isStatic: true, render: { fillStyle: "rgba(80,80,80,0.7)" } }
+      { isStatic: true, render: { fillStyle: 'rgba(80,80,80,0.6)' } }
     );
     const slotLower = Bodies.rectangle(
       REBA_LAUNCH_BASE_X,
       REBA_LAUNCH_BASE_Y + COIN_RADIUS + 5,
       baseBlockWidth,
       blockThickness,
-      { isStatic: true, render: { fillStyle: "rgba(80,80,80,0.7)" } }
+      { isStatic: true, render: { fillStyle: 'rgba(80,80,80,0.6)' } }
     );
     const slotLeftWall = Bodies.rectangle(
       REBA_LAUNCH_BASE_X - baseBlockWidth / 2 + 10,
       REBA_LAUNCH_BASE_Y,
       20,
       COIN_RADIUS * 4,
-      { isStatic: true, render: { fillStyle: "rgba(80,80,80,0.7)" } }
+      { isStatic: true, render: { fillStyle: 'rgba(80,80,80,0.6)' } }
     );
+
     Composite.add(world, [slotUpper, slotLower, slotLeftWall]);
 
     // ============================================================
-    // レバー UI
+    // レバー UI ロジック
     // ============================================================
-    const leverEl = document.getElementById("lever");
-    const angleTextEl = document.getElementById("angleText");
-    const powerTextEl = document.getElementById("powerText");
-    const gravityInput = document.getElementById("gravity");
-    const addCoinBtn = document.getElementById("addCoin");
-    const resetWorldBtn = document.getElementById("resetWorld");
+    const leverEl = document.getElementById('lever');
+    const angleTextEl = document.getElementById('angleText');
+    const powerTextEl = document.getElementById('powerText');
+    const gravityInput = document.getElementById('gravity');
+    const addCoinBtn = document.getElementById('addCoin');
+    const resetWorldBtn = document.getElementById('resetWorld');
 
     let leverAngleDeg = 0;
+    const maxAngleDeg = REBA_MAX_ANGLE_DEG;
+
     let isDraggingLever = false;
     let dragStartY = 0;
     let dragStartAngle = 0;
 
     function calcPullPower() {
-      const normalized = leverAngleDeg / REBA_MAX_ANGLE_DEG;
+      const normalized = leverAngleDeg / maxAngleDeg; // 0〜1
       return Math.pow(normalized, REBA_HEAVINESS_EXPONENT);
     }
 
@@ -443,7 +399,8 @@
     }
 
     function getLaunchPower() {
-      return calcPullPower() * REBA_MAX_LAUNCH_SPEED;
+      const pullPower = calcPullPower();
+      return pullPower * REBA_MAX_LAUNCH_SPEED;
     }
 
     function releaseLeverAndLaunch() {
@@ -459,31 +416,28 @@
         const dy = c.position.y - REBA_LAUNCH_BASE_Y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < REBA_LAUNCH_RADIUS) {
-          Body.setVelocity(c, {
-            x: dir.x * power,
-            y: dir.y * power
-          });
+          const vx = dir.x * power;
+          const vy = dir.y * power;
+          Body.setVelocity(c, { x: vx, y: vy });
         }
       });
       leverAngleDeg = 0;
       updateLeverVisual();
     }
 
-    function startDragLever(y) {
+    function startDragLever(startClientY) {
       isDraggingLever = true;
-      dragStartY = y;
+      dragStartY = startClientY;
       dragStartAngle = leverAngleDeg;
     }
-
-    function moveDragLever(y) {
+    function moveDragLever(currentClientY) {
       if (!isDraggingLever) return;
-      const dy = y - dragStartY;
+      const dy = currentClientY - dragStartY;
       let newAngle = dragStartAngle + dy * REBA_DRAG_SENSITIVITY;
-      newAngle = Math.max(0, Math.min(REBA_MAX_ANGLE_DEG, newAngle));
+      newAngle = Math.max(0, Math.min(maxAngleDeg, newAngle));
       leverAngleDeg = newAngle;
       updateLeverVisual();
     }
-
     function endDragLever() {
       if (!isDraggingLever) return;
       isDraggingLever = false;
@@ -491,34 +445,34 @@
     }
 
     // マウス
-    leverEl.addEventListener("mousedown", (e) => {
+    leverEl.addEventListener('mousedown', (e) => {
       e.preventDefault();
       startDragLever(e.clientY);
     });
-    window.addEventListener("mousemove", (e) => {
+    window.addEventListener('mousemove', (e) => {
       if (!isDraggingLever) return;
       e.preventDefault();
       moveDragLever(e.clientY);
     });
-    window.addEventListener("mouseup", (e) => {
+    window.addEventListener('mouseup', (e) => {
       if (!isDraggingLever) return;
       e.preventDefault();
       endDragLever();
     });
 
     // タッチ
-    leverEl.addEventListener("touchstart", (e) => {
+    leverEl.addEventListener('touchstart', (e) => {
       e.preventDefault();
       const t = e.touches[0];
       startDragLever(t.clientY);
     }, { passive: false });
-    window.addEventListener("touchmove", (e) => {
+    window.addEventListener('touchmove', (e) => {
       if (!isDraggingLever) return;
       e.preventDefault();
       const t = e.touches[0];
       moveDragLever(t.clientY);
     }, { passive: false });
-    window.addEventListener("touchend", (e) => {
+    window.addEventListener('touchend', (e) => {
       if (!isDraggingLever) return;
       e.preventDefault();
       endDragLever();
@@ -527,82 +481,199 @@
     updateLeverVisual();
 
     // ============================================================
-    // 運営モード UI & ロジック（棒追加）
+    // UI ボタン（10円など）
     // ============================================================
-    const adminPassInput = document.getElementById("adminPass");
-    const adminToggleBtn = document.getElementById("adminToggle");
-    const adminStatusEl = document.getElementById("adminStatus");
-
-    let adminMode = false;
-
-    function updateAdminUI() {
-      adminToggleBtn.textContent = adminMode ? "ON" : "OFF";
-      adminStatusEl.textContent = "運営モード: " + (adminMode ? "ON" : "OFF");
-      adminStatusEl.style.color = adminMode ? "#5fa" : "#a55";
-    }
-
-    adminToggleBtn.addEventListener("click", () => {
-      if (!adminMode) {
-        const inputPass = adminPassInput.value;
-        if (inputPass === ADMIN_PASSWORD) {
-          adminMode = true;
-        } else {
-          alert("パスワードが違います");
-        }
-      } else {
-        adminMode = false;
-      }
-      updateAdminUI();
-    });
-
-    // キャンバスクリックで棒追加（運営モード時のみ）
-    renderCanvas.addEventListener("mousedown", (e) => {
-      if (!adminMode) return;
-      const rect = renderCanvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      // 標準サイズ・角度0度の棒を追加（必要ならここをパラメータ化可能）
-      createBar(x, y, 120, 10, 0);
-    });
-
-    updateAdminUI();
-
-    // ============================================================
-    // UI: 重力・10円追加・リセット
-    // ============================================================
-    gravityInput.addEventListener("input", (e) => {
+    gravityInput.addEventListener('input', (e) => {
       const g = parseFloat(e.target.value) || 0;
       engine.world.gravity.y = g;
     });
 
-    addCoinBtn.addEventListener("click", () => {
+    addCoinBtn.addEventListener('click', () => {
       const x = REBA_LAUNCH_BASE_X + (Math.random() * 20 - 10);
       const y = REBA_LAUNCH_BASE_Y + (Math.random() * 10 - 5);
       addCoinAt(x, y);
     });
 
-    resetWorldBtn.addEventListener("click", () => {
+    resetWorldBtn.addEventListener('click', () => {
       coins.forEach(c => Composite.remove(world, c));
       coins.length = 0;
       addCoinAt(REBA_LAUNCH_BASE_X, REBA_LAUNCH_BASE_Y);
-      leverAngleDeg = 0;
-      updateLeverVisual();
     });
 
     // ============================================================
-    // 画像ロードしてからスタート
+    // 運営モード ロジック
     // ============================================================
-    (async () => {
-      try {
-        await loadImage("map", `${base}/map.png`);
-      } catch (e) {
-        console.warn("map.png を読み込めませんでした", e);
+    adminLoginBtn.addEventListener("click", () => {
+      if (!isAdmin) {
+        if (adminPassInput.value === ADMIN_PASSWORD) {
+          isAdmin = true;
+          adminStatusEl.textContent = "状態: 運営モード ON";
+        } else {
+          alert("パスワードが違います");
+          return;
+        }
+      } else {
+        isAdmin = false;
+        isEditBarMode = false;
+        updateOverlayMode();
+        adminStatusEl.textContent = "状態: 一般ユーザー";
       }
-      // 画像のロード完了後にエンジンはすでに走っているので、そのまま表示される
-    })();
+    });
 
-    window.addEventListener("resize", () => {
-      // 必要なら位置再計算やリロード
+    toggleEditBarBtn.addEventListener("click", () => {
+      if (!isAdmin) {
+        alert("運営モードではありません");
+        return;
+      }
+      isEditBarMode = !isEditBarMode;
+      updateOverlayMode();
+    });
+
+    resetBarsBtn.addEventListener("click", () => {
+      if (!isAdmin) {
+        alert("運営モードではありません");
+        return;
+      }
+      resetAllBars();
+    });
+
+    // ============================================================
+    // 棒の追加（点と点をつなぐ）
+    // ============================================================
+    const overlayCanvas = document.getElementById("worldOverlay");
+    overlayCanvas.width = canvasWidth;
+    overlayCanvas.height = canvasHeight;
+    const overlayCtx = overlayCanvas.getContext("2d");
+
+    let barBodies = [];       // Matter.js の棒オブジェクト
+    let editPoints = [];      // 今編集中の「点」2個まで
+
+    function updateOverlayMode() {
+      if (isAdmin && isEditBarMode) {
+        overlayCanvas.classList.add("editing");
+      } else {
+        overlayCanvas.classList.remove("editing");
+        editPoints = [];
+        drawOverlay();
+      }
+    }
+
+    function drawOverlay() {
+      overlayCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+      // 編集中: 1点目だけ決まっているときはマーカーを表示
+      if (editPoints.length === 1) {
+        const p = editPoints[0];
+        overlayCtx.strokeStyle = "#00ff00";
+        overlayCtx.lineWidth = 2;
+        overlayCtx.beginPath();
+        overlayCtx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+        overlayCtx.stroke();
+      }
+    }
+
+    // 棒を追加する（start {x,y} と end {x,y} を結ぶ）
+    function addBarFromPoints(p1, p2, thickness) {
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx);
+
+      const bar = Bodies.rectangle(midX, midY, length, thickness, {
+        isStatic: true,
+        angle: angle,
+        render: {
+          fillStyle: "rgba(200,200,200,0.8)"
+        }
+      });
+
+      Composite.add(world, bar);
+      barBodies.push(bar);
+    }
+
+    // キャンバス座標取得
+    function getCanvasPos(evt) {
+      const rect = overlayCanvas.getBoundingClientRect();
+      const x = (evt.clientX - rect.left) * (overlayCanvas.width / rect.width);
+      const y = (evt.clientY - rect.top) * (overlayCanvas.height / rect.height);
+      return { x, y };
+    }
+
+    overlayCanvas.addEventListener("mousedown", (e) => {
+      if (!isAdmin || !isEditBarMode) return;
+      const p = getCanvasPos(e);
+      editPoints.push(p);
+      if (editPoints.length === 2) {
+        // 2点揃ったら棒を追加
+        const thickness = parseFloat(barThicknessInput.value) || 10;
+        addBarFromPoints(editPoints[0], editPoints[1], thickness);
+        editPoints = [];
+      }
+      drawOverlay();
+    });
+
+    function resetAllBars() {
+      barBodies.forEach(b => Composite.remove(world, b));
+      barBodies = [];
+      editPoints = [];
+      drawOverlay();
+      saveBarsToStorage();   // 空で保存
+    }
+
+    // ============================================================
+    // 棒の保存・読み込み（localStorageによる簡易共有イメージ）
+    // ============================================================
+    const STORAGE_KEY_BARS = "10en_game_bars_v1";
+
+    function saveBarsToStorage() {
+      const data = barBodies.map(b => {
+        return {
+          x: b.position.x,
+          y: b.position.y,
+          angle: b.angle,
+          length: b.bounds.max.x - b.bounds.min.x,
+          thickness: b.bounds.max.y - b.bounds.min.y
+        };
+      });
+      localStorage.setItem(STORAGE_KEY_BARS, JSON.stringify(data));
+    }
+
+    function loadBarsFromStorage() {
+      const raw = localStorage.getItem(STORAGE_KEY_BARS);
+      if (!raw) return;
+      try {
+        const arr = JSON.parse(raw);
+        arr.forEach(info => {
+          const bar = Bodies.rectangle(info.x, info.y, info.length, info.thickness, {
+            isStatic: true,
+            angle: info.angle,
+            render: { fillStyle: "rgba(200,200,200,0.8)" }
+          });
+          Composite.add(world, bar);
+          barBodies.push(bar);
+        });
+      } catch(e) {
+        console.warn("棒の読み込みに失敗しました:", e);
+      }
+    }
+
+    // Matter.js の afterUpdate などで棒の状態を定期保存してもよいが、
+    // ここでは簡単に window.unload 時に保存
+    window.addEventListener("beforeunload", () => {
+      saveBarsToStorage();
+    });
+
+    // 初期ロード時に棒を復元
+    loadBarsFromStorage();
+
+    // ============================================================
+    // 補足：リサイズ時
+    // ============================================================
+    window.addEventListener('resize', () => {
+      // 本格対応には再レイアウト・再スケーリングが必要。
+      // とりあえず、リロード推奨としておく。
       // location.reload();
     });
   </script>
