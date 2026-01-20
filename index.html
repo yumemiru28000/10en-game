@@ -1,8 +1,9 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>10円 vs ren + kaisi（画像サイズ優先 + 自動棒変換 + CCD）</title>
+  <title>10円 vs ren + kaisi（画像サイズ優先 + 線に沿って棒化）</title>
   <style>
     body {
       margin: 0;
@@ -32,10 +33,9 @@
 <body>
   <div id="info">
     ・map.png / ren.png / kaisi.png の実サイズをそのままキャンバスに使用（拡大縮小なし）。<br>
-    ・ren.png の黒ドットをスキャンして、水平・垂直の連続黒を「棒（線分）」として自動生成。<br>
+    ・ren.png の黒ドットをグループ化し、それぞれを「1本の坂（棒：線分）」に近似して自動生成。<br>
     ・kaisi.png の黒いピクセルからランダムに10円（半径32px）を生成。<br>
-    ・10円の移動は「中心の移動線分」と棒線分の交差＋半径ぶん法線押し出しで、<br>
-　　  円として接触しつつ、坂に沿って転がるようにしています。
+    ・10円は、ren に沿って作られた棒の上を、坂の角度に応じて転がります（完全CCDではなく、サブステップ＋押し出し寄り）。
   </div>
 
   <div id="canvasWrapper">
@@ -104,11 +104,10 @@
       y: 0,
       vx: 0,
       vy: 0,
-      r: 32    // ★ 半径32
+      r: 32   // 半径32
     };
 
-    // 自動生成された棒（線分）
-    const slopes = [];
+    const slopes = []; // ren から自動生成された棒（線分）
 
     let paused = false;
     playPauseBtn.addEventListener("click", () => {
@@ -159,55 +158,103 @@
       return a > 20 && r < 40 && g < 40 && b < 40;
     }
 
-    // ren を「棒」に変換：水平 & 垂直の連続黒を線分に
+    // --- ren の線を「棒」に変換する処理 ---
     function extractSlopesFromRen() {
       slopes.length = 0;
+      if (!renData) return;
+
       const w = renData.width;
       const h = renData.height;
 
-      // 水平方向スキャン
-      for (let y = 0; y < h; y += 2) {
-        let x = 0;
-        while (x < w) {
-          while (x < w && !isBlackAt(renData, x, y)) x++;
-          if (x >= w) break;
-          const startX = x;
-          while (x < w && isBlackAt(renData, x, y)) x++;
-          const endX = x - 1;
-          const length = endX - startX;
-          if (length > 8) {
-            slopes.push({
-              x1: startX,
-              y1: y,
-              x2: endX,
-              y2: y
-            });
+      // 黒ピクセルマップと訪問フラグ
+      const isBlackMap = new Uint8Array(w * h);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          if (isBlackAt(renData, x, y)) {
+            isBlackMap[y*w + x] = 1;
           }
         }
       }
+      const visited = new Uint8Array(w * h);
 
-      // 垂直方向スキャン（急斜面や縦レール用）
-      for (let x = 0; x < w; x += 2) {
-        let y = 0;
-        while (y < h) {
-          while (y < h && !isBlackAt(renData, x, y)) y++;
-          if (y >= h) break;
-          const startY = y;
-          while (y < h && isBlackAt(renData, x, y)) y++;
-          const endY = y - 1;
-          const length = endY - startY;
-          if (length > 8) {
-            slopes.push({
-              x1: x,
-              y1: startY,
-              x2: x,
-              y2: endY
-            });
+      const dirs = [
+        [ 1,  0], [-1,  0],
+        [ 0,  1], [ 0, -1],
+        [ 1,  1], [ 1, -1],
+        [-1,  1], [-1, -1]
+      ];
+
+      function bfs(sx, sy) {
+        const queue = [[sx, sy]];
+        const pixels = [];
+        visited[sy*w + sx] = 1;
+
+        while (queue.length > 0) {
+          const [x, y] = queue.shift();
+          pixels.push({ x, y });
+
+          for (const [dx, dy] of dirs) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            const idx = ny*w + nx;
+            if (!isBlackMap[idx] || visited[idx]) continue;
+            visited[idx] = 1;
+            queue.push([nx, ny]);
           }
+        }
+        return pixels;
+      }
+
+      // 全ての黒ピクセルから連結成分を取って、それぞれを線分に近似
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = y*w + x;
+          if (!isBlackMap[idx] || visited[idx]) continue;
+          const comp = bfs(x, y);
+          if (comp.length < 5) continue; // 小さすぎるノイズは無視
+
+          // 連結成分 comp の「端と端」を見つける（簡易：最遠点ペア）
+          let bestA = comp[0];
+          let bestB = comp[0];
+          let bestDist2 = 0;
+
+          // まず1点目：comp[0] から最も遠い点
+          for (const p of comp) {
+            const dx = p.x - comp[0].x;
+            const dy = p.y - comp[0].y;
+            const d2 = dx*dx + dy*dy;
+            if (d2 > bestDist2) {
+              bestDist2 = d2;
+              bestA = p;
+            }
+          }
+
+          // 次に bestA から最も遠い点を bestB とする
+          bestDist2 = 0;
+          for (const p of comp) {
+            const dx = p.x - bestA.x;
+            const dy = p.y - bestA.y;
+            const d2 = dx*dx + dy*dy;
+            if (d2 > bestDist2) {
+              bestDist2 = d2;
+              bestB = p;
+            }
+          }
+
+          const length = Math.sqrt(bestDist2);
+          if (length < 10) continue; // 短すぎる線は無��
+
+          slopes.push({
+            x1: bestA.x,
+            y1: bestA.y,
+            x2: bestB.x,
+            y2: bestB.y
+          });
         }
       }
 
-      console.log("抽出された棒の本数:", slopes.length);
+      console.log("ren から生成された棒の本数:", slopes.length);
     }
 
     function extractStartPixelsFromKaisi() {
@@ -239,91 +286,26 @@
       coin.vy = 0;
     }
 
-    function segmentIntersection(p1, p2, p3, p4) {
-      const x1 = p1.x, y1 = p1.y;
-      const x2 = p2.x, y2 = p2.y;
-      const x3 = p3.x, y3 = p3.y;
-      const x4 = p4.x, y4 = p4.y;
-
-      const denom = (x1-x2)*(y3-y4) - (y1-y2)*(x3-x4);
-      if (Math.abs(denom) < 1e-8) return null;
-
-      const t = ((x1-x3)*(y3-y4) - (y1-y3)*(x3-x4)) / denom;
-      const u = -((x1-x2)*(y1-y3) - (y1-y2)*(x1-x3)) / denom;
-
-      if (t < 0 || t > 1 || u < 0 || u > 1) return null;
-
-      const ix = x1 + t*(x2-x1);
-      const iy = y1 + t*(y2-y1);
-      return { x: ix, y: iy, t };
-    }
-
     function updatePhysics() {
       if (paused) return;
       if (!renData) return;
 
-      const prev = { x: coin.x, y: coin.y };
+      // サブステップで「少しずつ動かして押し出す」（安定寄り）
+      const SUB_STEPS = 4;
+      const dt = 1 / SUB_STEPS;
 
-      coin.vy += GRAVITY;
-      const next = {
-        x: coin.x + coin.vx,
-        y: coin.y + coin.vy
-      };
+      for (let i = 0; i < SUB_STEPS; i++) {
+        // 重力
+        coin.vy += GRAVITY * dt;
+        // 移動
+        coin.x += coin.vx * dt;
+        coin.y += coin.vy * dt;
 
-      let earliestHit = null;
-
-      for (const s of slopes) {
-        const p1 = prev;
-        const p2 = next;
-        const p3 = { x: s.x1, y: s.y1 };
-        const p4 = { x: s.x2, y: s.y2 };
-        const hit = segmentIntersection(p1, p2, p3, p4);
-        if (!hit) continue;
-        if (!earliestHit || hit.t < earliestHit.hit.t) {
-          earliestHit = { hit, slope: s };
-        }
+        // 各棒と距離ベースで衝突チェック＆押し出し
+        resolveCollisionsWithSlopes(dt);
       }
 
-      if (!earliestHit) {
-        coin.x = next.x;
-        coin.y = next.y;
-      } else {
-        const { hit, slope } = earliestHit;
-
-        const dx = slope.x2 - slope.x1;
-        const dy = slope.y2 - slope.y1;
-        const len = Math.sqrt(dx*dx + dy*dy) || 1;
-        const tx = dx / len;
-        const ty = dy / len;
-        const nx = -ty;
-        const ny =  tx;
-
-        // 中心線との交点から、法線方向に半径ぶん押し出して「円として接触」
-        coin.x = hit.x + nx * coin.r;
-        coin.y = hit.y + ny * coin.r;
-
-        const vpx = coin.vx;
-        const vpy = coin.vy;
-        const v_parallel = vpx * tx + vpy * ty;
-        let v_normal   = vpx * nx + vpy * ny;
-
-        const BOUNCE = 0.0; // 少し跳ねさせたいなら 0.2 など
-        v_normal = -v_normal * BOUNCE;
-
-        const g_parallel = GRAVITY * ty;
-        let new_v_parallel = v_parallel + g_parallel;
-
-        if (Math.abs(g_parallel) < STATIC_THRESHOLD &&
-            Math.abs(v_parallel) < STATIC_THRESHOLD) {
-          new_v_parallel = 0;
-        } else {
-          new_v_parallel *= (1 - SLOPE_FRICTION);
-        }
-
-        coin.vx = new_v_parallel * tx + v_normal * nx;
-        coin.vy = new_v_parallel * ty + v_normal * ny;
-      }
-
+      // 画面枠
       const bounce = 0.3;
       if (coin.x - coin.r < 0) {
         coin.x = coin.r;
@@ -343,13 +325,77 @@
       }
     }
 
+    // 円 vs 線分の距離ベース判定 + 坂方向重力
+    function resolveCollisionsWithSlopes(dt) {
+      for (const s of slopes) {
+        const { px, py, d } = closestPointOnSegment(
+          s.x1, s.y1, s.x2, s.y2,
+          coin.x, coin.y
+        );
+        if (d >= coin.r) continue;
+
+        const dx = s.x2 - s.x1;
+        const dy = s.y2 - s.y1;
+        const len = Math.sqrt(dx*dx + dy*dy) || 1;
+        const tx = dx / len; // 接線
+        const ty = dy / len;
+        const nx = -ty;      // 法線
+        const ny =  tx;
+
+        // MTD 押し出し
+        const penetration = coin.r - d;
+        coin.x += nx * (penetration + 0.1);
+        coin.y += ny * (penetration + 0.1);
+
+        // 速度分解
+        const vpx = coin.vx;
+        const vpy = coin.vy;
+        const v_parallel = vpx * tx + vpy * ty;
+        let v_normal   = vpx * nx + vpy * ny;
+
+        // 法線速度はほぼ殺す
+        v_normal = 0;
+
+        // 坂に沿った重力成分
+        const g_parallel = GRAVITY * ty * dt;
+        let new_v_parallel = v_parallel + g_parallel;
+
+        // 静止摩擦
+        if (Math.abs(g_parallel) < STATIC_THRESHOLD * dt &&
+            Math.abs(v_parallel) < STATIC_THRESHOLD) {
+          new_v_parallel = 0;
+        } else {
+          new_v_parallel *= (1 - SLOPE_FRICTION);
+        }
+
+        coin.vx = new_v_parallel * tx + v_normal * nx;
+        coin.vy = new_v_parallel * ty + v_normal * ny;
+      }
+    }
+
+    function closestPointOnSegment(ax, ay, bx, by, cx, cy) {
+      const abx = bx - ax;
+      const aby = by - ay;
+      const acx = cx - ax;
+      const acy = cy - ay;
+      const abLen2 = abx*abx + aby*aby || 1;
+      let t = (acx * abx + acy * aby) / abLen2;
+      t = Math.max(0, Math.min(1, t));
+      const px = ax + abx * t;
+      const py = ay + aby * t;
+      const dx = cx - px;
+      const dy = cy - py;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      return { px, py, d, t };
+    }
+
     function draw() {
       if (!bgImage.complete) return;
 
       ctx.clearRect(0,0,canvas.width,canvas.height);
       ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
 
-      // 自動生成された棒
+      // ren に沿って生成された棒
       ctx.strokeStyle = "#44aaff";
       ctx.lineWidth = 2;
       for (const s of slopes) {
