@@ -114,30 +114,36 @@
       background: #000;
     }
 
-    /* レバー表示エリア */
+    /* レバーエリア：reba1画像の横にスライダーを置く */
     #leverRow {
       margin-top: 8px;
       display: flex;
       justify-content: space-between;
+      gap: 8px;
     }
 
     .lever-column {
       flex: 1;
       display: flex;
       flex-direction: column;
+      gap: 4px;
+    }
+
+    .lever-item {
+      display: flex;
       align-items: center;
       gap: 4px;
     }
 
-    .lever-visual {
+    .lever-visual-img {
       width: 40px;
       height: 40px;
-      border-radius: 999px;
-      border: 2px solid #888;
-      position: relative;
-      margin-bottom: 2px;
       background: #111;
+      border-radius: 999px;
+      border: 1px solid #666;
       overflow: hidden;
+      position: relative;
+      flex-shrink: 0;
     }
 
     .lever-stick {
@@ -148,15 +154,18 @@
       height: 18px;
       background: #ccc;
       transform-origin: bottom center;
+      transform: translate(-50%, 0) rotate(0deg);
+    }
+
+    .lever-slider {
+      flex: 1;
     }
 
     .lever-label {
       font-size: 11px;
       opacity: 0.8;
-    }
-
-    .lever-slider {
-      width: 70%;
+      width: 32px;
+      text-align: right;
     }
 
     .top-right-menu {
@@ -226,7 +235,7 @@
       <button id="endGameBtn">ゲームを終わる</button>
     </div>
 
-    <!-- 6本レバー（左右に3本ずつ） -->
+    <!-- レバー：左右3本ずつ -->
     <div id="leverRow">
       <div class="lever-column" id="leftLevers"></div>
       <div class="lever-column" id="rightLevers"></div>
@@ -253,7 +262,6 @@
   </div>
 </div>
 
-<!-- Firebase & アプリ本体 -->
 <script type="module">
   // ==========================
   // Firebase 初期化
@@ -364,7 +372,7 @@
       endGameBtn.disabled = true;
       setLeverEnabled(false);
     } else if (st === 'B') {
-      stateLabelEl.textContent = `状態：${currentPlaying?.name || '-'} が挑戦中（観戦中）`;
+      stateLabelEl.textContent = `状態：${currentPlaying?.name || '-'} が��戦中（観戦中）`;
       insertCoinBtn.disabled = true;
       waitBtn.disabled = false;
       endGameBtn.disabled = true;
@@ -465,7 +473,7 @@
   });
 
   // ==========================
-  // 10円ゲーム：PNG＆物理
+  // PNG 読み込み＆物理
   // ==========================
   const canvas = document.getElementById('gameCanvas');
   const ctx = canvas.getContext('2d');
@@ -486,7 +494,6 @@
   let anaData = null;
   let atariData = null;
   let kaisiData = null;
-  let rebaData = null;
 
   function loadImage(key, url) {
     return new Promise((resolve, reject) => {
@@ -524,19 +531,16 @@
       hitCtx.drawImage(images.ren, 0, 0, hitCanvas.width, hitCanvas.height);
       renData = hitCtx.getImageData(0, 0, hitCanvas.width, hitCanvas.height);
     }
-
     if (images.ana) {
       hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
       hitCtx.drawImage(images.ana, 0, 0, hitCanvas.width, hitCanvas.height);
       anaData = hitCtx.getImageData(0, 0, hitCanvas.width, hitCanvas.height);
     }
-
     if (images.atari) {
       hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
       hitCtx.drawImage(images.atari, 0, 0, hitCanvas.width, hitCanvas.height);
       atariData = hitCtx.getImageData(0, 0, hitCanvas.width, hitCanvas.height);
     }
-
     if (images.kaisi) {
       hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
       hitCtx.drawImage(images.kaisi, 0, 0, hitCanvas.width, hitCanvas.height);
@@ -544,11 +548,7 @@
       detectStartPosition();
     }
 
-    if (images.reba) {
-      hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
-      hitCtx.drawImage(images.reba, 0, 0, hitCanvas.width, hitCanvas.height);
-      rebaData = hitCtx.getImageData(0, 0, hitCanvas.width, hitCanvas.height);
-    }
+    setupLevers(); // reba1 を使うのに画像読み込み後の方が安全
   }
 
   function isBlackPixel(imgData, x, y) {
@@ -566,13 +566,13 @@
     return (r < th && g < th && b < th);
   }
 
-  // 10円玉状態と「重い感じ」の物理
+  // 10円玉：サイズを 4/5 に（元が10なら 8）
   const coin = {
     x: canvas.width / 2,
     y: canvas.height / 2,
     vx: 0,
     vy: 0,
-    r: 10,
+    r: 8,       // ★ 小さくした
     inPlay: false,
     cleared: false,
     failed: false,
@@ -582,7 +582,6 @@
 
   function detectStartPosition() {
     if (!kaisiData) return;
-    // 画面全体から最初の黒ピクセルを探す（簡易）
     const w = kaisiData.width;
     const h = kaisiData.height;
     for (let y = 0; y < h; y++) {
@@ -611,51 +610,67 @@
     coin.failed = false;
   }
 
-  // 重力：縦置き台を想定して「下向き＋やや強め」
-  const gravity = 0.45;   // 重い硬貨イメージ
-  const friction = 0.02;
-  const bounce = 0.3;
+  // 重さ4.5g をイメージして「慣性はあるが、重力は地球と同じくらい」に調整
+  const gravity = 0.5;    // px/frame^2 （感覚調整値）
+  const friction = 0.01;  // 空気抵抗
+  const bounce = 0.25;    // 壁に当たったときの反発
 
   function updatePhysics() {
     if (!coin.inPlay) return;
     if (coin.cleared || coin.failed) return;
 
+    // 下向き重力
     coin.vy += gravity;
+
+    // 空気抵抗
     coin.vx *= (1 - friction);
     coin.vy *= (1 - friction);
 
     let nextX = coin.x + coin.vx;
     let nextY = coin.y + coin.vy;
 
-    // レーンとの当たり判定
+    // レーンとの接触を調べて「斜面にそって転がす」
     if (renData) {
-      const sampleCount = 10;
-      let hitLeft = false, hitRight = false, hitTop = false, hitBottom = false;
+      const sampleCount = 12;
+      let count = 0;
+      let nxSum = 0;
+      let nySum = 0;
+
       for (let i = 0; i < sampleCount; i++) {
         const angle = (Math.PI * 2 * i) / sampleCount;
         const sx = nextX + Math.cos(angle) * coin.r;
         const sy = nextY + Math.sin(angle) * coin.r;
         if (isBlackPixel(renData, sx, sy)) {
-          if (Math.cos(angle) < -0.5) hitLeft = true;
-          if (Math.cos(angle) >  0.5) hitRight = true;
-          if (Math.sin(angle) < -0.5) hitTop = true;
-          if (Math.sin(angle) >  0.5) hitBottom = true;
+          // 円→外向きベクトル（だいたい法線方向）
+          const nx = Math.cos(angle);
+          const ny = Math.sin(angle);
+          nxSum += nx;
+          nySum += ny;
+          count++;
         }
       }
-      if (hitLeft && coin.vx < 0) {
-        coin.vx *= -bounce;
+
+      if (count > 0) {
+        // 平均法線
+        let nx = nxSum / count;
+        let ny = nySum / count;
+        const nLen = Math.sqrt(nx * nx + ny * ny) || 1;
+        nx /= nLen;
+        ny /= nLen;
+
+        // 速度ベクトルを法線＆接線に分解
+        const vDotN = coin.vx * nx + coin.vy * ny;        // 法線成分
+        const vnX = vDotN * nx;
+        const vnY = vDotN * ny;
+        const vtX = coin.vx - vnX;                         // 接線成分
+        const vtY = coin.vy - vnY;
+
+        // 法線成分はつぶして（or 少しだけバウンド）、接線成分だけ残し「斜面に沿って転がる」
+        coin.vx = vtX + (-vnX * bounce * 0.2); // ほんの少しだけ跳ね返り
+        coin.vy = vtY + (-vnY * bounce * 0.2);
+
+        // 法線方向に少しだけ押し戻して、めり込み防止
         nextX = coin.x + coin.vx;
-      }
-      if (hitRight && coin.vx > 0) {
-        coin.vx *= -bounce;
-        nextX = coin.x + coin.vx;
-      }
-      if (hitTop && coin.vy < 0) {
-        coin.vy *= -bounce;
-        nextY = coin.y + coin.vy;
-      }
-      if (hitBottom && coin.vy > 0) {
-        coin.vy *= -bounce;
         nextY = coin.y + coin.vy;
       }
     }
@@ -663,7 +678,7 @@
     coin.x = nextX;
     coin.y = nextY;
 
-    // 枠の内側に軽く押し戻す
+    // 枠との衝突
     if (coin.x - coin.r < 0) {
       coin.x = coin.r;
       coin.vx *= -bounce;
@@ -700,31 +715,36 @@
   }
 
   // ==========================
-  // レバー6本
+  // レバー6本（reba1画像＋スライダー）
   // ==========================
   const leftLeversEl = document.getElementById('leftLevers');
   const rightLeversEl = document.getElementById('rightLevers');
-
-  // index: 0,1,2 = 左上～左下 / 3,4,5 = 右上～右下
   const leverStates = [];
 
   function createLever(index, side) {
-    const col = (side === 'left') ? leftLeversEl : rightLeversEl;
+    const col = side === 'left' ? leftLeversEl : rightLeversEl;
 
-    const wrapper = document.createElement('div');
+    const item = document.createElement('div');
+    item.className = 'lever-item';
 
     const visual = document.createElement('div');
-    visual.className = 'lever-visual';
+    visual.className = 'lever-visual-img';
+
+    // reba1.png を背景的に表示（縮小）
+    if (images.reba1) {
+      visual.style.backgroundImage = `url(${images.reba1.src})`;
+      visual.style.backgroundSize = 'cover';
+      visual.style.backgroundPosition = 'center';
+    }
 
     const stick = document.createElement('div');
     stick.className = 'lever-stick';
-    stick.style.transform = 'translate(-50%, 0) rotate(0deg)';
     visual.appendChild(stick);
 
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.min = '0';
-    slider.max = '100';     // 0~100 引き量
+    slider.max = '100';
     slider.step = '1';
     slider.value = '0';
     slider.className = 'lever-slider';
@@ -733,10 +753,10 @@
     label.className = 'lever-label';
     label.textContent = side === 'left' ? `L${index+1}` : `R${index-2}`;
 
-    wrapper.appendChild(visual);
-    wrapper.appendChild(slider);
-    wrapper.appendChild(label);
-    col.appendChild(wrapper);
+    item.appendChild(visual);
+    item.appendChild(slider);
+    item.appendChild(label);
+    col.appendChild(item);
 
     const lever = { index, side, slider, stick, value: 0 };
     leverStates.push(lever);
@@ -751,15 +771,12 @@
       const v = Number(slider.value);
       lever.value = v;
 
-      // レバーの見た目回転：0 → -90度（時計回り）
-      const angle = -90 * (v / 100);
+      const angle = -90 * (v / 100); // 0→-90度 時計回り
       stick.style.transform = `translate(-50%, 0) rotate(${angle}deg)`;
 
-      // 引くにしたがって重く感じるのは、アニメ側だけでは難しいのでここでは速度計算に使う
-
-      // 「離した瞬間」を検知（v が急に下がったら）
+      // 引き→離した瞬間を検知
       if (prevValue > 20 && v < 5) {
-        const power = prevValue / 100; // 0~1
+        const power = prevValue / 100;
         fireLever(lever, power);
       }
 
@@ -769,73 +786,52 @@
   }
 
   function setupLevers() {
-    // 左3本 (index 0,1,2)
+    // 左3（index 0,1,2）
     for (let i = 0; i < 3; i++) {
       createLever(i, 'left');
     }
-    // 右3本 (index 3,4,5)
+    // 右3（index 3,4,5）
     for (let i = 3; i < 6; i++) {
       createLever(i, 'right');
     }
   }
 
-  // レバー発射処理
+  // レバーエリアは「左右×3列」に簡易分割
   function fireLever(lever, power) {
     if (!coin.inPlay || coin.cleared || coin.failed) return;
-    if (!rebaData) return;
 
-    // そのレバーに対応する「当たり判定エリア」に10円が居るかチェック
-    // 簡易：盤面を左右に3分割して、それぞれ「レバーエリア」とみなす
     const w = canvas.width;
     const h = canvas.height;
 
     const colWidth = w / 3;
-    let colIndex;
-    if (lever.side === 'left') {
-      // 左側3本を左から上中下の高さに分けている想定だが、
-      // ここでは横方向だけで簡易に判定：左側1/3を全て対象とする
-      colIndex = 0;
-    } else {
-      colIndex = 2;
-    }
-    const colXMin = colWidth * colIndex;
-    const colXMax = colWidth * (colIndex + 1);
-
-    // 縦方向は 3分割
     const rowHeight = h / 3;
-    let rowIndex;
-    if (lever.side === 'left') {
-      rowIndex = lever.index;        // 0,1,2
-    } else {
-      rowIndex = lever.index - 3;    // 0,1,2
-    }
-    const rowYMin = rowHeight * rowIndex;
-    const rowYMax = rowHeight * (rowIndex + 1);
 
-    const inArea = (
+    let colIndex = (lever.side === 'left') ? 0 : 2;
+    let rowIndex = (lever.side === 'left') ? lever.index : lever.index - 3;
+
+    const colXMin = colIndex * colWidth;
+    const colXMax = colXMin + colWidth;
+    const rowYMin = rowIndex * rowHeight;
+    const rowYMax = rowYMin + rowHeight;
+
+    const inArea =
       coin.x >= colXMin && coin.x <= colXMax &&
-      coin.y >= rowYMin && coin.y <= rowYMax
-    );
+      coin.y >= rowYMin && coin.y <= rowYMax;
 
     if (!inArea) {
-      // 近くにないと空振り
+      // 空振り
       return;
     }
 
-    // 発射方向：レバー側 → 中央側（反対方向）
-    // 左レバーなら右向き、右レバーなら左向き
     const dirX = (lever.side === 'left') ? 1 : -1;
-    const baseSpeed = 7;  // 最大威力時のベース速度（調整してOK）
+    const baseSpeed = 8; // 打ち出しの基礎速度（調整可）
     const speed = baseSpeed * power;
 
-    // 10円に速度を加える（「弾く」）
     coin.vx += dirX * speed;
-    // 少しだけ上にも弾く（台が縦でレールに沿って打ち上げるイメージ）
-    coin.vy -= speed * 0.4;
+    coin.vy -= speed * 0.5; // 少し上にも飛ばす
 
-    infoMsgEl.textContent = `レバー${lever.side === 'left' ? 'L' : 'R'} から発射！`;
+    infoMsgEl.textContent = `${lever.side === 'left' ? '左' : '右'}レバーから発射！`;
 
-    // スライダー位置を戻す
     lever.slider.value = '0';
     lever.value = 0;
     lever.stick.style.transform = 'translate(-50%, 0) rotate(0deg)';
@@ -845,7 +841,6 @@
   // 描画
   // ==========================
   function drawGame() {
-    // 背景
     if (images.map) {
       ctx.drawImage(images.map, 0, 0, canvas.width, canvas.height);
     } else {
@@ -853,12 +848,11 @@
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
-    // 10円
     if (coin.inPlay || coin.cleared || coin.failed) {
       ctx.save();
       ctx.translate(coin.x, coin.y);
       const speed = Math.sqrt(coin.vx*coin.vx + coin.vy*coin.vy);
-      const rot = performance.now() * 0.005 * speed;
+      const rot = performance.now() * 0.004 * speed;
       ctx.rotate(rot);
 
       const g = ctx.createRadialGradient(0,0,coin.r*0.2,0,0,coin.r);
@@ -870,7 +864,7 @@
       ctx.fill();
 
       ctx.fillStyle = '#5b3a10';
-      ctx.font = 'bold 10px system-ui';
+      ctx.font = 'bold 9px system-ui';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('10',0,0);
@@ -895,7 +889,7 @@
     const myHand = hands[Math.floor(Math.random() * 3)];
     const cpuHand = hands[Math.floor(Math.random() * 3)];
     let result;
-    if (myHand === cpuHand) result = '��いこ';
+    if (myHand === cpuHand) result = 'あいこ';
     else if (
       (myHand === 'グー' && cpuHand === 'チョキ') ||
       (myHand === 'チョキ' && cpuHand === 'パー') ||
@@ -908,7 +902,6 @@
   // ==========================
   // 初期化
   // ==========================
-  setupLevers();
   loadAssets().then(() => {
     spawnCoinAtStart();
     gameLoop();
