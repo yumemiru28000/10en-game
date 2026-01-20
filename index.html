@@ -1,9 +1,8 @@
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>10円 vs ren + kaisi（画像サイズ優先 + 線に沿って棒化）</title>
+  <title>10円 vs ren輪郭 + kaisi（画像サイズ優先 + 縁取り棒）</title>
   <style>
     body {
       margin: 0;
@@ -33,9 +32,9 @@
 <body>
   <div id="info">
     ・map.png / ren.png / kaisi.png の実サイズをそのままキャンバスに使用（拡大縮小なし）。<br>
-    ・ren.png の黒ドットをグループ化し、それぞれを「1本の坂（棒：線分）」に近似して自動生成。<br>
+    ・ren.png の黒と背景の「境目」ピクセルをすべて抽出し、その輪郭に沿って短い棒（線分チェーン）を自動生成。<br>
     ・kaisi.png の黒いピクセルからランダムに10円（半径32px）を生成。<br>
-    ・10円は、ren に沿って作られた棒の上を、坂の角度に応じて転がります（完全CCDではなく、サブステップ＋押し出し寄り）。
+    ・10円は、ren の縁取り棒の上をサブステップ＋距離ベース判定で転がります。
   </div>
 
   <div id="canvasWrapper">
@@ -104,10 +103,10 @@
       y: 0,
       vx: 0,
       vy: 0,
-      r: 32   // 半径32
+      r: 32
     };
 
-    const slopes = []; // ren から自動生成された棒（線分）
+    const slopes = []; // 縁取りから生成された短い棒たち
 
     let paused = false;
     playPauseBtn.addEventListener("click", () => {
@@ -142,7 +141,7 @@
       kaisiCtx.drawImage(kaisiImage, 0, 0, w, h);
       kaisiData = kaisiCtx.getImageData(0, 0, w, h);
 
-      extractSlopesFromRen();
+      extractOutlineSlopesFromRen();
       extractStartPixelsFromKaisi();
 
       resetCoinFromKaisi();
@@ -158,103 +157,115 @@
       return a > 20 && r < 40 && g < 40 && b < 40;
     }
 
-    // --- ren の線を「棒」に変換する処理 ---
-    function extractSlopesFromRen() {
+    // 黒→背景の「境界ドット」を検出し、その輪郭に沿って棒チェーンを作る
+    function extractOutlineSlopesFromRen() {
       slopes.length = 0;
       if (!renData) return;
 
       const w = renData.width;
       const h = renData.height;
 
-      // 黒ピクセルマップと訪問フラグ
-      const isBlackMap = new Uint8Array(w * h);
+      // 1. 黒マップ & 境界マップ
+      const isBlackMap   = new Uint8Array(w * h);
+      const isBorderMap  = new Uint8Array(w * h);
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
+          const idx = y*w + x;
           if (isBlackAt(renData, x, y)) {
-            isBlackMap[y*w + x] = 1;
+            isBlackMap[idx] = 1;
           }
         }
       }
-      const visited = new Uint8Array(w * h);
 
-      const dirs = [
+      const neigh4 = [
+        [ 1,  0], [-1,  0],
+        [ 0,  1], [ 0, -1]
+      ];
+
+      // 黒で、かつ4近傍のどこかが非黒なら「境界」
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = y*w + x;
+          if (!isBlackMap[idx]) continue;
+          let isBorder = false;
+          for (const [dx, dy] of neigh4) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) {
+              isBorder = true;
+              break;
+            }
+            const nidx = ny*w + nx;
+            if (!isBlackMap[nidx]) {
+              isBorder = true;
+              break;
+            }
+          }
+          if (isBorder) {
+            isBorderMap[idx] = 1;
+          }
+        }
+      }
+
+      // 2. 境界ドットの連結成分（輪郭）ごとに棒チェーン化
+      const visited = new Uint8Array(w*h);
+      const neigh8 = [
         [ 1,  0], [-1,  0],
         [ 0,  1], [ 0, -1],
         [ 1,  1], [ 1, -1],
         [-1,  1], [-1, -1]
       ];
 
-      function bfs(sx, sy) {
-        const queue = [[sx, sy]];
+      function bfsOutline(sx, sy) {
+        const q = [[sx, sy]];
         const pixels = [];
         visited[sy*w + sx] = 1;
-
-        while (queue.length > 0) {
-          const [x, y] = queue.shift();
+        while (q.length) {
+          const [x, y] = q.shift();
           pixels.push({ x, y });
-
-          for (const [dx, dy] of dirs) {
+          for (const [dx, dy] of neigh8) {
             const nx = x + dx;
             const ny = y + dy;
             if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
             const idx = ny*w + nx;
-            if (!isBlackMap[idx] || visited[idx]) continue;
+            if (!isBorderMap[idx] || visited[idx]) continue;
             visited[idx] = 1;
-            queue.push([nx, ny]);
+            q.push([nx, ny]);
           }
         }
         return pixels;
       }
 
-      // 全ての黒ピクセルから連結成分を取って、それぞれを線分に近似
+      const MIN_OUTLINE_PIXELS = 10;   // 輪郭ノイズ除去
+      const SEGMENT_STEP       = 6;    // 何ドットごとに折れ点を作るか
+
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
           const idx = y*w + x;
-          if (!isBlackMap[idx] || visited[idx]) continue;
-          const comp = bfs(x, y);
-          if (comp.length < 5) continue; // 小さすぎるノイズは無視
+          if (!isBorderMap[idx] || visited[idx]) continue;
+          const outline = bfsOutline(x, y);
+          if (outline.length < MIN_OUTLINE_PIXELS) continue; // 小さいノイズ輪郭は無視
 
-          // 連結成分 comp の「端と端」を見つける（簡易：最遠点ペア）
-          let bestA = comp[0];
-          let bestB = comp[0];
-          let bestDist2 = 0;
-
-          // まず1点目：comp[0] から最も遠い点
-          for (const p of comp) {
-            const dx = p.x - comp[0].x;
-            const dy = p.y - comp[0].y;
-            const d2 = dx*dx + dy*dy;
-            if (d2 > bestDist2) {
-              bestDist2 = d2;
-              bestA = p;
-            }
+          // 輪郭のピクセル配列 outline を、順番近似としてそのまま使う
+          // 一定ステップごとに点を間引きして短い線分チェーンにする
+          for (let i = 0; i < outline.length - SEGMENT_STEP; i += SEGMENT_STEP) {
+            const p1 = outline[i];
+            const p2 = outline[i + SEGMENT_STEP];
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const len = Math.sqrt(dx*dx + dy*dy);
+            if (len < 4) continue; // 短すぎるセグメントは無視
+            slopes.push({
+              x1: p1.x,
+              y1: p1.y,
+              x2: p2.x,
+              y2: p2.y
+            });
           }
-
-          // 次に bestA から最も遠い点を bestB とする
-          bestDist2 = 0;
-          for (const p of comp) {
-            const dx = p.x - bestA.x;
-            const dy = p.y - bestA.y;
-            const d2 = dx*dx + dy*dy;
-            if (d2 > bestDist2) {
-              bestDist2 = d2;
-              bestB = p;
-            }
-          }
-
-          const length = Math.sqrt(bestDist2);
-          if (length < 10) continue; // 短すぎる線は無��
-
-          slopes.push({
-            x1: bestA.x,
-            y1: bestA.y,
-            x2: bestB.x,
-            y2: bestB.y
-          });
         }
       }
 
-      console.log("ren から生成された棒の本数:", slopes.length);
+      console.log("ren 縁取りから生成された棒の本数:", slopes.length);
     }
 
     function extractStartPixelsFromKaisi() {
@@ -290,22 +301,17 @@
       if (paused) return;
       if (!renData) return;
 
-      // サブステップで「少しずつ動かして押し出す」（安定寄り）
       const SUB_STEPS = 4;
       const dt = 1 / SUB_STEPS;
 
       for (let i = 0; i < SUB_STEPS; i++) {
-        // 重力
         coin.vy += GRAVITY * dt;
-        // 移動
         coin.x += coin.vx * dt;
         coin.y += coin.vy * dt;
 
-        // 各棒と距離ベースで衝突チェック＆押し出し
         resolveCollisionsWithSlopes(dt);
       }
 
-      // 画面枠
       const bounce = 0.3;
       if (coin.x - coin.r < 0) {
         coin.x = coin.r;
@@ -325,7 +331,6 @@
       }
     }
 
-    // 円 vs 線分の距離ベース判定 + 坂方向重力
     function resolveCollisionsWithSlopes(dt) {
       for (const s of slopes) {
         const { px, py, d } = closestPointOnSegment(
@@ -337,30 +342,25 @@
         const dx = s.x2 - s.x1;
         const dy = s.y2 - s.y1;
         const len = Math.sqrt(dx*dx + dy*dy) || 1;
-        const tx = dx / len; // 接線
+        const tx = dx / len;
         const ty = dy / len;
-        const nx = -ty;      // 法線
+        const nx = -ty;
         const ny =  tx;
 
-        // MTD 押し出し
         const penetration = coin.r - d;
-        coin.x += nx * (penetration + 0.1);
-        coin.y += ny * (penetration + 0.1);
+        coin.x += nx * (penetration + 0.2);
+        coin.y += ny * (penetration + 0.2);
 
-        // 速度分解
         const vpx = coin.vx;
         const vpy = coin.vy;
         const v_parallel = vpx * tx + vpy * ty;
         let v_normal   = vpx * nx + vpy * ny;
 
-        // 法線速度はほぼ殺す
         v_normal = 0;
 
-        // 坂に沿った重力成分
         const g_parallel = GRAVITY * ty * dt;
         let new_v_parallel = v_parallel + g_parallel;
 
-        // 静止摩擦
         if (Math.abs(g_parallel) < STATIC_THRESHOLD * dt &&
             Math.abs(v_parallel) < STATIC_THRESHOLD) {
           new_v_parallel = 0;
@@ -395,7 +395,7 @@
       ctx.clearRect(0,0,canvas.width,canvas.height);
       ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
 
-      // ren に沿って生成された棒
+      // ren 縁取りから作られた棒
       ctx.strokeStyle = "#44aaff";
       ctx.lineWidth = 2;
       for (const s of slopes) {
