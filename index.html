@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>線エディタ（map.png 上で描画 → 数値出力 → 再生成）</title>
+  <style>
+    body {
+      margin: 0;
+      background: #222;
+      color: #eee;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: row;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #uiPanel {
+      width: 260px;
+      background: #111;
+      border-right: 1px solid #333;
+      padding: 8px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 12px;
+    }
+    #world {
+      flex: 1;
+      position: relative;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #gameCanvas {
+      display: block;
+      background: #000;
+    }
+    textarea {
+      width: 100%;
+      height: 160px;
+      background: #000;
+      color: #0f0;
+      font-family: monospace;
+      font-size: 11px;
+      border: 1px solid #555;
+      box-sizing: border-box;
+      resize: vertical;
+    }
+    button {
+      font-size: 11px;
+      padding: 3px 6px;
+      background: #333;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 3px;
+      cursor: pointer;
+      margin: 2px 0;
+    }
+    button:hover {
+      background: #444;
+    }
+    input[type="number"] {
+      width: 60px;
+      background: #222;
+      border: 1px solid #555;
+      color: #eee;
+      padding: 2px 4px;
+      border-radius: 3px;
+      font-size: 11px;
+    }
+    .label-small {
+      font-size: 11px;
+      color: #ccc;
+    }
+    #modeLabel {
+      font-size: 11px;
+      color: #0f0;
+    }
+  </style>
+</head>
+<body>
+  <div id="uiPanel">
+    <div>
+      <div class="label-small"><b>線エディタ（map.png 上）</b></div>
+      <div class="label-small">
+        1. キャンバス上をドラッグして線を描く<br>
+        2. 「数値に変換」を押すと、0〜1に正規化された座標配列が右下に出ます<br>
+        3. その配列をコードに貼り付けると、どの解像度でも同じ形を再生成できます
+      </div>
+    </div>
+
+    <div>
+      <span class="label-small">モード：</span>
+      <span id="modeLabel">描画モード</span><br>
+      <button id="toggleModeBtn">▶ 再生モードに切り替え</button>
+    </div>
+
+    <div>
+      <span class="label-small">描画サンプリング間隔（px）</span><br>
+      <input id="sampleStepInput" type="number" value="4" min="1" max="50">
+    </div>
+
+    <div>
+      <button id="clearLinesBtn">描いた線を全てクリア</button>
+      <button id="exportLinesBtn">数値に変換（正規化）</button>
+    </div>
+
+    <div>
+      <span class="label-small">出力 / 入力用配列（コピー＆貼り付け）</span><br>
+      <textarea id="outputTextarea" spellcheck="false"></textarea>
+    </div>
+
+    <div>
+      <span class="label-small">再生モード設定</span><br>
+      <button id="loadFromTextareaBtn">テキストから読み込んで再生</button>
+      <div class="label-small">
+        ※再生モードでは、この配列の線のみが map 上に表示されます。<br>
+        後でここに貼ると、その位置に坂を作るコードを書きます。
+      </div>
+    </div>
+  </div>
+
+  <div id="world">
+    <canvas id="gameCanvas"></canvas>
+  </div>
+
+  <script>
+    // ========== 設定 ==========
+    const MAP_URL = "map.png"; // 同じフォルダに map.png を置いてください
+
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    const modeLabel = document.getElementById("modeLabel");
+    const toggleModeBtn = document.getElementById("toggleModeBtn");
+    const sampleStepInput = document.getElementById("sampleStepInput");
+    const clearLinesBtn = document.getElementById("clearLinesBtn");
+    const exportLinesBtn = document.getElementById("exportLinesBtn");
+    const outputTextarea = document.getElementById("outputTextarea");
+    const loadFromTextareaBtn = document.getElementById("loadFromTextareaBtn");
+
+    let drawingMode = true; // true: ユーザー描画モード, false: 再生モード
+
+    // キャンバスと map のサイズ
+    const bgImage = new Image();
+    bgImage.src = MAP_URL;
+    bgImage.onload = () => {
+      // 画像サイズ優先でキャンバスを合わせる
+      const w = bgImage.naturalWidth  || bgImage.width;
+      const h = bgImage.naturalHeight || bgImage.height;
+      canvas.width  = w;
+      canvas.height = h;
+      drawFrame();
+    };
+
+    // ========== 線データ構造 ==========
+    // line: { points: [{x,y}, ...] }  ※x,yはピクセル座標（キャンバスサイズ基準）
+    const drawnLines = [];   // 描画モードでユーザーが描いた線
+    let replayLines = [];    // 再生モードで表示する正規化座標の線
+
+    // 現在描いている線
+    let currentLine = null;
+    let isDrawing = false;
+    let lastSamplePos = null;
+
+    function canvasToNormalized(p) {
+      return {
+        x: p.x / canvas.width,
+        y: p.y / canvas.height
+      };
+    }
+
+    function normalizedToCanvas(p) {
+      return {
+        x: p.x * canvas.width,
+        y: p.y * canvas.height
+      };
+    }
+
+    // ========== マウス / タッチで線を描く ==========
+    function getCanvasPos(evt) {
+      const rect = canvas.getBoundingClientRect();
+      if (evt.touches && evt.touches.length > 0) {
+        return {
+          x: evt.touches[0].clientX - rect.left,
+          y: evt.touches[0].clientY - rect.top
+        };
+      } else {
+        return {
+          x: evt.clientX - rect.left,
+          y: evt.clientY - rect.top
+        };
+      }
+    }
+
+    function startDraw(evt) {
+      if (!drawingMode) return;
+      evt.preventDefault();
+      const pos = getCanvasPos(evt);
+      isDrawing = true;
+      const step = Math.max(1, parseInt(sampleStepInput.value, 10) || 4);
+      currentLine = { points: [pos], sampleStep: step };
+      lastSamplePos = pos;
+      drawnLines.push(currentLine);
+      drawFrame();
+    }
+
+    function moveDraw(evt) {
+      if (!drawingMode || !isDrawing || !currentLine) return;
+      evt.preventDefault();
+      const pos = getCanvasPos(evt);
+      const dx = pos.x - lastSamplePos.x;
+      const dy = pos.y - lastSamplePos.y;
+      const dist2 = dx*dx + dy*dy;
+      const step = currentLine.sampleStep;
+      if (dist2 >= step*step) {
+        currentLine.points.push(pos);
+        lastSamplePos = pos;
+        drawFrame();
+      }
+    }
+
+    function endDraw(evt) {
+      if (!drawingMode) return;
+      evt.preventDefault();
+      isDrawing = false;
+      currentLine = null;
+      lastSamplePos = null;
+    }
+
+    canvas.addEventListener("mousedown", startDraw);
+    canvas.addEventListener("mousemove", moveDraw);
+    window.addEventListener("mouseup", endDraw);
+
+    canvas.addEventListener("touchstart", startDraw, { passive: false });
+    canvas.addEventListener("touchmove",  moveDraw,  { passive: false });
+    canvas.addEventListener("touchend",   endDraw,   { passive: false });
+
+    // ========== 描画 / 再生モード切り替え ==========
+    toggleModeBtn.addEventListener("click", () => {
+      drawingMode = !drawingMode;
+      if (drawingMode) {
+        modeLabel.textContent = "描画モード";
+        toggleModeBtn.textContent = "▶ 再生モードに切り替え";
+      } else {
+        modeLabel.textContent = "再生モード（配列の形を再生成）";
+        toggleModeBtn.textContent = "▶ 描画モードに切り替え";
+      }
+      drawFrame();
+    });
+
+    // ========== 線のクリア ==========
+    clearLinesBtn.addEventListener("click", () => {
+      drawnLines.length = 0;
+      drawFrame();
+    });
+
+    // ========== 線を数値（正規化配列）に変換して出力 ==========
+    exportLinesBtn.addEventListener("click", () => {
+      if (drawnLines.length === 0) {
+        outputTextarea.value = "// 線がありません";
+        return;
+      }
+
+      // 各線ごとに 0〜1 の座標配列に変換
+      // 出力形式： [ [[x1,y1], [x2,y2], ...],  [...], ... ]
+      const allLines = drawnLines.map(line => {
+        return line.points.map(p => {
+          const np = canvasToNormalized(p);
+          // 小数3桁に丸め
+          return [
+            parseFloat(np.x.toFixed(4)),
+            parseFloat(np.y.toFixed(4))
+          ];
+        });
+      });
+
+      const json = JSON.stringify(allLines, null, 2);
+      outputTextarea.value = json;
+    });
+
+    // ========== テキストエリアから読み込んで再生成（replay） ==========
+    loadFromTextareaBtn.addEventListener("click", () => {
+      const text = outputTextarea.value.trim();
+      if (!text) return;
+      try {
+        const parsed = JSON.parse(text);
+        // parsed は [ [ [nx,ny], ... ], [ ... ], ... ] の想定
+        replayLines = parsed;
+        drawingMode = false;
+        modeLabel.textContent = "再生モード（配列の形を再生成）";
+        toggleModeBtn.textContent = "▶ 描画モードに切り替え";
+        drawFrame();
+      } catch (e) {
+        alert("JSON のパースに失敗しました。配列の形式を確認してください。");
+      }
+    });
+
+    // ========== フレーム描画 ==========
+    function drawFrame() {
+      if (!bgImage.complete) return;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      if (drawingMode) {
+        // 描画モード：ユーザーが描いた線をそのまま表示
+        ctx.strokeStyle = "#00ff88";
+        for (const line of drawnLines) {
+          if (!line.points || line.points.length < 2) continue;
+          ctx.beginPath();
+          const pts = line.points;
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) {
+            ctx.lineTo(pts[i].x, pts[i].y);
+          }
+          ctx.stroke();
+        }
+      } else {
+        // 再生モード：replayLines（正規化配列）を現在のキャンバスサイズで再描画
+        ctx.strokeStyle = "#ffcc00";
+        for (const nline of replayLines) {
+          if (!nline || nline.length < 2) continue;
+          ctx.beginPath();
+          const p0 = normalizedToCanvas({ x: nline[0][0], y: nline[0][1] });
+          ctx.moveTo(p0.x, p0.y);
+          for (let i = 1; i < nline.length; i++) {
+            const p = normalizedToCanvas({ x: nline[i][0], y: nline[i][1] });
+            ctx.lineTo(p.x, p.y);
+          }
+          ctx.stroke();
+        }
+      }
+    }
+
+    // リサイズ時も map を合わせて再描画（画像基準でキャンバスは固定にしているので、
+    // ここでは単なる再描画のみ）
+    window.addEventListener("resize", drawFrame);
+  </script>
+</body>
+</html>
