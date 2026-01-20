@@ -47,7 +47,7 @@
     .screen {
       display: none;
       width: 100%;
-      max-width: 480px;
+      max-width: 640px;
       padding: 16px;
       box-sizing: border-box;
     }
@@ -83,11 +83,26 @@
 
     .small { font-size: 12px; opacity: 0.8; }
 
+    /* 盤面＋左右のレバーUIをまとめたコンテナ */
+    #gameOuter {
+      display: flex;
+      justify-content: center;
+      align-items: stretch;
+      gap: 4px;
+    }
+
+    /* 左右レバー列 */
+    .leverColumnOuter {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-around;
+      align-items: center;
+      width: 80px;
+    }
+
     #gameContainer {
       position: relative;
-      width: 100%;
-      max-width: 420px;
-      margin: 0 auto;
+      width: 282px;
       background: #000;
       border-radius: 10px;
       overflow: hidden;
@@ -121,27 +136,17 @@
       margin-bottom: 8px;
     }
 
-    /* レバーUIをキャンバス上に重ねる */
-    #leverOverlay {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-    }
-
+    /* レバー1本分UI */
     .lever-ui {
-      position: absolute;
       display: flex;
+      flex-direction: column;
       align-items: center;
       gap: 4px;
-      pointer-events: auto;
     }
 
     .lever-image {
-      width: 36px;
-      height: 36px;
+      width: 40px;
+      height: 40px;
       border-radius: 999px;
       overflow: hidden;
       border: 1px solid #666;
@@ -161,13 +166,13 @@
       transform: translate(-50%, 0) rotate(0deg);
     }
 
-    .lever-slider { width: 70px; }
+    .lever-slider {
+      width: 70px;
+    }
 
     .lever-label {
-      font-size: 10px;
+      font-size: 11px;
       opacity: 0.9;
-      min-width: 20px;
-      text-align: left;
     }
   </style>
 </head>
@@ -208,9 +213,18 @@
     </div>
     <div class="small" id="stateLabel">状態：接続中...</div>
 
-    <div id="gameContainer">
-      <canvas id="gameCanvas" width="282" height="521"></canvas>
-      <div id="leverOverlay"></div>
+    <!-- 盤面＋レバー -->
+    <div id="gameOuter">
+      <!-- 左レバー列 -->
+      <div id="leftLeverCol" class="leverColumnOuter"></div>
+
+      <!-- 盤面 -->
+      <div id="gameContainer">
+        <canvas id="gameCanvas" width="282" height="521"></canvas>
+      </div>
+
+      <!-- 右レバー列 -->
+      <div id="rightLeverCol" class="leverColumnOuter"></div>
     </div>
 
     <div class="center" style="margin-top:8px;">
@@ -221,14 +235,13 @@
 
     <div class="msg" id="infoMsg"></div>
     <div class="small">
-      ・誰��いない時：今なら遊べます<br>
+      ・誰もいない時：今なら遊べます<br>
       ・PLAYING：○○が挑戦中（観戦のみ）<br>
       ・待機：次に遊びたい人：n人
     </div>
 
     <div class="small" style="margin-top:6px;">
-      ※ デバッグ中：<br>
-      map=そのまま / ren=赤 / ana=青 / atari=緑 / kaisi=黄 / reba=マゼンタ
+      ※ デバッグ表示：map=通常 / ren=赤 / ana=青 / atari=緑 / kaisi=黄 / reba=マゼンタ
     </div>
   </div>
 </div>
@@ -431,12 +444,11 @@
   // ==========================
   const canvas = document.getElementById('gameCanvas');
   const ctx = canvas.getContext('2d');
-  const leverOverlay = document.getElementById('leverOverlay');
 
   const images = { map:null, ren:null, ana:null, atari:null, kaisi:null, reba:null, reba1:null };
   const hitCanvas = document.createElement('canvas');
   const hitCtx = hitCanvas.getContext('2d');
-  let renData=null, anaData=null, atariData=null, kaisiData=null;
+  let renData=null, anaData=null, atariData=null, kaisiData=null, rebaData=null;
 
   function loadImage(key,url){
     return new Promise((resolve,reject)=>{
@@ -484,8 +496,13 @@
       kaisiData=hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
       detectStartCandidate();
     }
+    if(images.reba){
+      hitCtx.clearRect(0,0,hitCanvas.width,hitCanvas.height);
+      hitCtx.drawImage(images.reba,0,0,hitCanvas.width,hitCanvas.height);
+      rebaData=hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
+    }
 
-    setupLeversUI();
+    setupLeversUI(); // reba1使用
   }
 
   function isBlackPixel(imgData,x,y){
@@ -540,6 +557,41 @@
 
   const gravity=0.7, friction=0.012, bounce=0.25;
 
+  function resolveWallCollision(){
+    if(!renData) return;
+    // 最大2回まで解決試行
+    for(let iter=0;iter<2;iter++){
+      const sampleCount=16;
+      let hitCount=0, nxSum=0, nySum=0;
+      let anyHit=false;
+      for(let i=0;i<sampleCount;i++){
+        const ang=Math.PI*2*i/sampleCount;
+        const sx=coin.x+Math.cos(ang)*coin.r;
+        const sy=coin.y+Math.sin(ang)*coin.r;
+        if(isBlackPixel(renData,sx,sy)){
+          nxSum+=Math.cos(ang);
+          nySum+=Math.sin(ang);
+          hitCount++; anyHit=true;
+        }
+      }
+      if(!anyHit) break;
+      let nx=nxSum/hitCount, ny=nySum/hitCount;
+      const len=Math.sqrt(nx*nx+ny*ny)||1;
+      nx/=len; ny/=len;
+      // 速度を法線・接線分解
+      const vDotN=coin.vx*nx+coin.vy*ny;
+      const vnX=vDotN*nx, vnY=vDotN*ny;
+      const vtX=coin.vx-vnX, vtY=coin.vy-vnY;
+      // 法線成分ほぼ殺す
+      coin.vx = vtX;
+      coin.vy = vtY;
+      // 外側へ強めに押し出す
+      const pushOut=2.0;
+      coin.x += nx*pushOut;
+      coin.y += ny*pushOut;
+    }
+  }
+
   function updatePhysics(){
     if(!coin.inPlay || coin.cleared || coin.failed) return;
 
@@ -547,47 +599,10 @@
     coin.vx *= (1-friction);
     coin.vy *= (1-friction);
 
-    let nextX=coin.x+coin.vx, nextY=coin.y+coin.vy;
+    coin.x += coin.vx;
+    coin.y += coin.vy;
 
-    if(renData){
-      const sampleCount=12;
-      let hitCount=0, nxSum=0, nySum=0;
-
-      for(let i=0;i<sampleCount;i++){
-        const ang=Math.PI*2*i/sampleCount;
-        const sx=nextX+Math.cos(ang)*coin.r;
-        const sy=nextY+Math.sin(ang)*coin.r;
-        if(isBlackPixel(renData,sx,sy)){
-          nxSum+=Math.cos(ang);
-          nySum+=Math.sin(ang);
-          hitCount++;
-        }
-      }
-
-      if(hitCount){
-        // 平均法線ベクトル（外側向き）
-        let nx=nxSum/hitCount, ny=nySum/hitCount;
-        const len=Math.sqrt(nx*nx+ny*ny)||1;
-        nx/=len; ny/=len;
-
-        // 速度を法線・接線に分解
-        const vDotN=coin.vx*nx+coin.vy*ny;
-        const vnX=vDotN*nx, vnY=vDotN*ny;
-        const vtX=coin.vx-vnX, vtY=coin.vy-vnY;
-
-        // 法線側は強めに殺し、接線だけ残す → 壁に食い込まず、斜面に沿って転がる
-        coin.vx = vtX - vnX*bounce*0.6;
-        coin.vy = vtY - vnY*bounce*0.6;
-
-        // ★ めり込み補正：法線方向に少し外へ押し戻す
-        const pushOut = 1.5; // ここを大きくすると、10円と壁の隙間が広がる
-        nextX = coin.x + coin.vx + nx * pushOut;
-        nextY = coin.y + coin.vy + ny * pushOut;
-      }
-    }
-
-    coin.x = nextX;
-    coin.y = nextY;
+    resolveWallCollision();
 
     // 枠
     if(coin.x-coin.r<0){ coin.x=coin.r; coin.vx*=-bounce; }
@@ -611,95 +626,123 @@
   }
 
   // ==========================
-  // レバーUI（reba1 の近く）
+  // レバー UI ＋ 発射判定（reba）
   // ==========================
-  const leverStates=[];
+  const leftLeverCol = document.getElementById('leftLeverCol');
+  const rightLeverCol = document.getElementById('rightLeverCol');
+  const leverStates = [];
+
   function setupLeversUI(){
-    leverOverlay.innerHTML=''; leverStates.length=0;
-    const w=canvas.width, h=canvas.height;
-    const pos=[
-      { index:0, side:'left',  x:w*0.1, y:h*0.2 },
-      { index:1, side:'left',  x:w*0.1, y:h*0.5 },
-      { index:2, side:'left',  x:w*0.1, y:h*0.8 },
-      { index:3, side:'right', x:w*0.9, y:h*0.2 },
-      { index:4, side:'right', x:w*0.9, y:h*0.5 },
-      { index:5, side:'right', x:w*0.9, y:h*0.8 },
-    ];
-    pos.forEach(lp=>{
-      const ui=document.createElement('div');
-      ui.className='lever-ui';
-      ui.style.left=`${lp.x-18}px`;
-      ui.style.top =`${lp.y-18}px`;
+    leftLeverCol.innerHTML='';
+    rightLeverCol.innerHTML='';
+    leverStates.length=0;
 
-      const imgBox=document.createElement('div');
-      imgBox.className='lever-image';
-      if(images.reba1){
-        imgBox.style.backgroundImage=`url(${images.reba1.src})`;
-        imgBox.style.backgroundSize='cover';
-        imgBox.style.backgroundPosition='center';
-      }
-      const stick=document.createElement('div');
-      stick.className='lever-stick';
-      imgBox.appendChild(stick);
+    // 上中下の表示だけ決める（発射判定そのものは reba.png 側）
+    const leftIds=[0,1,2];
+    const rightIds=[3,4,5];
 
-      const slider=document.createElement('input');
-      slider.type='range'; slider.min='0'; slider.max='100';
-      slider.step='1'; slider.value='0'; slider.className='lever-slider';
+    leftIds.forEach((idx,i)=>{
+      const ui=createLeverUI(idx,'left',`L${i+1}`);
+      leftLeverCol.appendChild(ui.container);
+      leverStates.push(ui.state);
+    });
 
-      const label=document.createElement('span');
-      label.className='lever-label';
-      label.textContent=(lp.side==='left')?`L${lp.index+1}`:`R${lp.index-2}`;
-
-      if(lp.side==='left'){ ui.appendChild(imgBox); ui.appendChild(slider); ui.appendChild(label); }
-      else { ui.appendChild(label); ui.appendChild(slider); ui.appendChild(imgBox); }
-
-      leverOverlay.appendChild(ui);
-
-      const lever={...lp,slider,stick,value:0};
-      leverStates.push(lever);
-
-      let prev=0;
-      slider.addEventListener('input',()=>{
-        if(calcState()!=='C'){ slider.value='0'; return; }
-        const v=Number(slider.value);
-        lever.value=v;
-        const ang=-90*(v/100);
-        lever.stick.style.transform=`translate(-50%, 0) rotate(${ang}deg)`;
-        if(prev>20 && v<5){
-          const power=prev/100;
-          fireLever(lever,power);
-        }
-        prev=v;
-        touchAction();
-      });
+    rightIds.forEach((idx,i)=>{
+      const ui=createLeverUI(idx,'right',`R${i+1}`);
+      rightLeverCol.appendChild(ui.container);
+      leverStates.push(ui.state);
     });
   }
 
+  function createLeverUI(index,side,labelText){
+    const container=document.createElement('div');
+    container.className='lever-ui';
+
+    const imgBox=document.createElement('div');
+    imgBox.className='lever-image';
+    if(images.reba1){
+      imgBox.style.backgroundImage=`url(${images.reba1.src})`;
+      imgBox.style.backgroundSize='cover';
+      imgBox.style.backgroundPosition='center';
+    }
+    const stick=document.createElement('div');
+    stick.className='lever-stick';
+    imgBox.appendChild(stick);
+
+    const slider=document.createElement('input');
+    slider.type='range';
+    slider.min='0'; slider.max='100'; slider.step='1';
+    slider.value='0';
+    slider.className='lever-slider';
+
+    const label=document.createElement('div');
+    label.className='lever-label';
+    label.textContent=labelText;
+
+    container.appendChild(imgBox);
+    container.appendChild(slider);
+    container.appendChild(label);
+
+    const state={ index, side, slider, stick, value:0, storedValue:0 };
+    let prev=0;
+
+    slider.addEventListener('input',()=>{
+      if(calcState()!=='C'){ slider.value='0'; return; }
+
+      // 「重さ」を演出：現在値が高いほど、変化量を小さくする
+      const raw=Number(slider.value);
+      const diff=raw-prev;
+      const stiffness = 1 + prev/50; // 1〜3くらい
+      const applied = prev + diff/stiffness;
+      const v = Math.max(0,Math.min(100,applied));
+      slider.value = String(v);
+
+      state.value = v;
+      state.storedValue = Math.max(state.storedValue, v); // 最大溜めを保存
+
+      const ang=-90*(v/100);
+      state.stick.style.transform=`translate(-50%, 0) rotate(${ang}deg)`;
+
+      // 離した瞬間： v < 5 かつ prev > 20
+      if(prev>20 && v<5){
+        const power=state.storedValue/100;
+        fireLever(state,power);
+        state.storedValue=0;
+        slider.value='0';
+        state.value=0;
+        state.stick.style.transform='translate(-50%, 0) rotate(0deg)';
+      }
+
+      prev=v;
+      touchAction();
+    });
+
+    return { container, state };
+  }
+
+  // レバー打ち出し判定：reba.png の黒を使う
   function fireLever(lever,power){
     if(!coin.inPlay||coin.cleared||coin.failed) return;
-    const w=canvas.width,h=canvas.height;
-    const colW=w/3,rowH=h/3;
-    const rowIndex=(lever.side==='left')?lever.index:lever.index-3;
-    const colIndex=(lever.side==='left')?0:2;
-    const colXMin=colW*colIndex,colXMax=colXMin+colW;
-    const rowYMin=rowH*rowIndex,rowYMax=rowYMin+rowH;
-    const inArea=(coin.x>=colXMin&&coin.x<=colXMax&&coin.y>=rowYMin&&coin.y<=rowYMax);
-    if(!inArea) return;
+    if(!rebaData) return;
 
-    const dirX=(lever.side==='left')?1:-1;
-    const baseSpeed=12;
-    const speed=baseSpeed*power;
+    // コイン中心が reba 黒に乗っているか（この瞬間だけ判定）
+    if(!isBlackPixel(rebaData,coin.x,coin.y)) return;
+
+    // 打ち出す方向：レバー側 → 内側（左右逆）
+    const dirX = (lever.side==='left') ? 1 : -1;
+
+    // 今までより強め
+    const baseSpeed=16; // 前よりさらに強く
+    const speed = baseSpeed*power;
+
     coin.vx += dirX*speed;
     coin.vy -= speed*0.5;
-    infoMsgEl.textContent = `${lever.side==='left'?'左':'右'}レバーから発射！`;
 
-    lever.slider.value='0';
-    lever.value=0;
-    lever.stick.style.transform='translate(-50%, 0) rotate(0deg)';
+    infoMsgEl.textContent = `${lever.side==='left'?'左':'右'}レバーから発射！`;
   }
 
   // ==========================
-  // 描画（全PNGを色分け表示）
+  // 描画：全PNGを色分け表示
   // ==========================
   function drawGame(){
     ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -725,7 +768,6 @@
       ctx.save();
       ctx.globalAlpha=0.3;
       ctx.globalCompositeOperation='lighten';
-      ctx.fillStyle='rgba(0,0,255,0.3)';
       ctx.drawImage(images.ana,0,0,canvas.width,canvas.height);
       ctx.restore();
     }
