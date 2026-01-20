@@ -1,9 +1,8 @@
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>10円ゲーム 統合実験版（マップ＋複数レバー＋棒編集）</title>
+  <title>10円ゲーム マップ＆レバー実験 v1拡張</title>
   <style>
     body {
       margin: 0;
@@ -28,6 +27,54 @@
       font-size: 12px;
     }
 
+    #leverArea {
+      position: relative;
+      width: 220px;
+      height: 140px;
+      margin: 0 auto;
+      border: 1px solid #444;
+      background: #181818;
+      border-radius: 4px;
+      touch-action: none;
+    }
+
+    #lever {
+      position: absolute;
+      width: 12px;
+      height: 80px;
+      background: #ccc;
+      left: 50%;
+      bottom: 15px;
+      transform-origin: 50% 100%;
+      transform: translateX(-50%) rotate(0deg);
+      cursor: grab;
+    }
+    #lever:active {
+      cursor: grabbing;
+    }
+    #lever::after {
+      content: "";
+      position: absolute;
+      width: 30px;
+      height: 12px;
+      background: #ccc;
+      left: 50%;
+      top: 0;
+      transform: translateX(-50%);
+    }
+    #leverLabel {
+      position: absolute;
+      left: 4px;
+      bottom: 4px;
+      font-size: 10px;
+      color: #aaa;
+    }
+
+    #leverInfo {
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
     #world {
       flex: 1;
       position: relative;
@@ -40,80 +87,35 @@
       background-position: center center;
     }
 
-    /* レバー UI 共通 */
-    .leverArea {
-      position: relative;
-      width: 220px;
-      height: 120px;
-      margin: 4px auto;
-      border: 1px solid #444;
-      background: #181818;
-      border-radius: 4px;
-      touch-action: none;
-    }
-
-    .lever {
-      position: absolute;
-      width: 12px;
-      height: 70px;
-      background: #ccc;
-      left: 50%;
-      bottom: 15px;
-      transform-origin: 50% 100%;
-      transform: translateX(-50%) rotate(0deg);
-      cursor: grab;
-    }
-    .lever:active {
-      cursor: grabbing;
-    }
-    .lever::after {
-      content: "";
-      position: absolute;
-      width: 30px;
-      height: 12px;
-      background: #ccc;
-      left: 50%;
-      top: 0;
-      transform: translateX(-50%);
-    }
-    .leverLabel {
-      position: absolute;
-      left: 4px;
-      bottom: 4px;
-      font-size: 10px;
-      color: #aaa;
-    }
-
     button {
-      font-size: 11px;
-      padding: 3px 6px;
+      font-size: 12px;
+      padding: 4px 8px;
       background: #333;
       color: #eee;
       border: 1px solid #555;
       border-radius: 3px;
       cursor: pointer;
-      margin: 1px 0;
+      margin-bottom: 4px;
     }
     button:hover {
       background: #444;
     }
-
-    input[type="number"], input[type="password"] {
+    input[type="number"],
+    input[type="password"],
+    input[type="text"] {
+      width: 80px;
       background: #222;
       border: 1px solid #555;
       color: #eee;
       padding: 2px 4px;
       border-radius: 3px;
-    }
-
-    input[type="number"] {
-      width: 60px;
+      margin-bottom: 4px;
     }
 
     #adminPanel {
       border-top: 1px solid #333;
-      padding-top: 4px;
-      margin-top: 4px;
+      padding-top: 6px;
+      margin-top: 6px;
       font-size: 11px;
     }
     #adminPanel.disabled {
@@ -130,66 +132,114 @@
       font-size: 11px;
       color: #aaa;
     }
-
     #stickThickness {
       width: 100%;
     }
 
-    .leverConfig {
-      border: 1px solid #333;
-      border-radius: 4px;
-      padding: 4px;
-      margin-bottom: 4px;
-      font-size: 11px;
+    .admin-only {
+      display: none;
     }
-    .leverConfigTitle {
-      font-weight: bold;
-      margin-bottom: 2px;
+    .admin-visible {
+      display: block;
+    }
+
+    fieldset {
+      border: 1px solid #444;
+      margin-bottom: 6px;
+      padding: 4px;
+    }
+    legend {
+      font-size: 11px;
+      padding: 0 4px;
+      color: #ccc;
+    }
+    label {
+      display: inline-block;
+      min-width: 70px;
     }
   </style>
 </head>
 <body>
   <div id="uiPanel">
-    <!-- 共通設定（運営/一般 共通で見える） -->
-    <div>
-      <div><strong>全体設定</strong></div>
-      重力:
-      <input id="gravity" type="number" step="0.1" value="1.0">
-      <button id="addCoinGlobal">10円を追加</button>
+    <!-- レバー UI -->
+    <div id="leverArea">
+      <div id="lever"></div>
+      <div id="leverLabel">レバー</div>
+    </div>
+    <div id="leverInfo">
+      角度: <span id="angleText">0</span>°<br>
+      引き具合(0～1): <span id="powerText">0.00</span>
     </div>
 
-    <!-- 運営モード ログインのみ常に表示 -->
-    <div id="adminLoginPanel">
-      <div><strong>運営モード ログイン</strong></div>
+    <!-- 一般設定 -->
+    <div>
+      重力:
+      <input id="gravity" type="number" step="0.1" value="9.8">
+      <br>
+      <button id="addCoin">10円を置く</button>
+      <button id="resetWorld">10円リセット</button>
+    </div>
+
+    <!-- 運営モード（ここだけ常に表示。中身は後で制御） -->
+    <div id="adminPanel" class="disabled">
+      <div><strong>運営モード</strong></div>
       <div id="adminStatus">未ログイン</div>
       パスワード:
       <input id="adminPass" type="password" placeholder="1122">
       <button id="adminLogin">ログイン</button>
-    </div>
 
-    <!-- 運営専用パネル（ログイン後にまとめて表示） -->
-    <div id="adminPanel" class="disabled" style="display:none;">
-      <div><strong>運営メニュー</strong></div>
+      <!-- ここ以下は運営にのみ表示 -->
+      <div id="adminInner" class="admin-only">
+        <!-- レバー＆スポーン管理 -->
+        <fieldset>
+          <legend>レバー / スポーン設定</legend>
+          <div>
+            <label>レバー番号</label>
+            <select id="leverIndexSelect"></select>
+            <button id="addLeverConfig">追加</button>
+          </div>
+          <div>
+            <label>スポーンX</label>
+            <input id="spawnX" type="number">
+            <label>Y</label>
+            <input id="spawnY" type="number">
+          </div>
+          <div>
+            <label>レバーX</label>
+            <input id="leverX" type="number">
+            <label>Y</label>
+            <input id="leverY" type="number">
+          </div>
+          <div>
+            <label>方向(°)</label>
+            <input id="launchDeg" type="number">
+          </div>
+          <div>
+            <label>最大強さ</label>
+            <input id="launchPower" type="number">
+          </div>
+          <div>
+            <button id="applyLeverConfig">設定を適用</button>
+          </div>
+          <div>
+            <button id="resetLeverPos">レバー位置リセット</button>
+            <button id="resetSpawnPos">スポーン位置リセット</button>
+          </div>
+        </fieldset>
 
-      <!-- レバー 1〜N 設定 -->
-      <div id="leverContainer"></div>
-
-      <!-- 棒編集 -->
-      <div style="border-top:1px solid #333; margin-top:4px; padding-top:4px;">
-        <div><strong>棒編集</strong></div>
-        <button id="toggleStickEdit">棒編集モード: OFF</button><br>
-        棒の太さ:
-        <input id="stickThickness" type="range" min="5" max="50" value="20">
-        <span id="stickThicknessLabel">20</span> px<br>
-        <button id="resetSticks">棒 全リセット</button>
-        <div id="stickInfo">
-          棒編集モード中: キャンバス上を2回クリックすると、その2点をつなぐ棒が作られます。
-        </div>
-      </div>
-
-      <!-- 10円 全リセット -->
-      <div style="border-top:1px solid #333; margin-top:4px; padding-top:4px;">
-        <button id="resetAllCoins">10円 全リセット</button>
+        <!-- 棒編集 -->
+        <fieldset>
+          <legend>棒編集</legend>
+          <button id="toggleStickEdit">棒編集モード: OFF</button><br>
+          棒の太さ:
+          <input id="stickThickness" type="range" min="5" max="50" value="20">
+          <span id="stickThicknessLabel">20</span> px<br>
+          <button id="resetSticks">棒 全リセット</button>
+          <div id="stickInfo">
+            棒編集モード中: キャンバス上を2回クリックすると<br>
+            その2点をつなぐ棒ができます。
+          </div>
+        </fieldset>
       </div>
     </div>
   </div>
@@ -200,59 +250,33 @@
   <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
   <script>
     // ============================================================
-    // 設定用定数
+    // 設定用定数（v1ベース）
     // ============================================================
-    // レバーの共通特性（「重くなる度合い」など）
-    const REBA_HEAVINESS_EXPONENT = 3.0;
+    const REBA_HEAVINESS_EXPONENT = 3.0;   // 引くほど重く（非線形）
     const REBA_MAX_ANGLE_DEG      = 90;
     const REBA_DRAG_SENSITIVITY   = 0.5;
+    const REBA_LAUNCH_RADIUS      = 30;
 
-    // 10円（5.5g）＋よく転がる用の摩擦
+    // 10円（5.5g）: 斜面でよく転がるように v1 っぽい摩擦
     const COIN_RADIUS = 11;
     const COIN_MASS   = 0.0055;
-    const COIN_FRICTION       = 0.02;
-    const COIN_FRICTION_STATIC= 0.05;
-    const COIN_FRICTION_AIR   = 0.0005;
-    const COIN_RESTITUTION    = 0.2;
+    const COIN_FRICTION        = 0.01;   // 動摩擦かなり小さい
+    const COIN_FRICTION_STATIC = 0.03;   // 静止摩擦も低め
+    const COIN_FRICTION_AIR    = 0.0003; // 空気抵抗少なめ
+    const COIN_RESTITUTION     = 0.2;
 
-    // 斜面での「下向き成分に応じた追加加速」の強さ
-    // 大きいほど、斜面に沿ってどんどん加速する
-    const SLOPE_BOOST_FACTOR = 0.0008;
-
-    // 中央のテスト用わずかな斜面の角度（ラジアン）
-    const REBA_TEST_SLOPE_ANGLE = 0.04;
+    // デフォルトのレバー＆スポーン
+    const DEFAULT_LEVER_CONFIG = {
+      spawnX: 260,
+      spawnY: 320,
+      leverX: 260,
+      leverY: 120,   // 画面上のレバーアイコン表示用（世界座標とは独立した UI だが、管理用に保存）
+      launchDeg: -45,
+      maxPower: 35
+    };
 
     // マップ画像
     const MAP_IMAGE_URL = "https://raw.githubusercontent.com/yumemiru28000/10en-game/main/map.png";
-
-    // レバーの数（1〜N）
-    const LEVER_COUNT = 2;
-
-    // 各レバーの初期設定
-    const initialLevers = [
-      {
-        id: 1,
-        label: "レバー1",
-        spawnX: 260,
-        spawnY: 320,
-        launchX: 260,
-        launchY: 320,
-        launchAngleDeg: -45,
-        maxLaunchSpeed: 35,
-        launchRadius: 30
-      },
-      {
-        id: 2,
-        label: "レバー2",
-        spawnX: 600,
-        spawnY: 300,
-        launchX: 600,
-        launchY: 300,
-        launchAngleDeg: -60,
-        maxLaunchSpeed: 30,
-        launchRadius: 35
-      }
-    ];
 
     // ============================================================
     // Matter.js セットアップ
@@ -268,36 +292,34 @@
 
     const engine = Engine.create();
     const world  = engine.world;
-    engine.world.gravity.y = 1.0;
+    engine.world.gravity.y = 9.8; // 地球の重力に近い値
 
-    const canvasWidth  = window.innerWidth - 260;
+    const canvasWidth  = window.innerWidth - 260; // UIパネル分
     const canvasHeight = window.innerHeight;
 
     const render = Render.create({
-      element: document.getElementById("world"),
+      element: document.getElementById('world'),
       engine: engine,
       options: {
         width: canvasWidth,
         height: canvasHeight,
         wireframes: false,
-        background: "#000"
+        background: '#000'
       }
     });
     Render.run(render);
     const runner = Runner.create();
     Runner.run(runner, engine);
 
-    // map.png を背景に
     render.canvas.style.backgroundImage = `url("${MAP_IMAGE_URL}")`;
     render.canvas.style.backgroundSize = "contain";
     render.canvas.style.backgroundRepeat = "no-repeat";
     render.canvas.style.backgroundPosition = "center center";
 
     // ============================================================
-    // フィールド（壁・斜面）
+    // 壁・フィールド
     // ============================================================
     const thickness = 40;
-
     const leftWall = Bodies.rectangle(20, canvasHeight / 2, thickness, canvasHeight, {
       isStatic: true,
       render: { fillStyle: "rgba(80,80,80,0.6)" }
@@ -322,6 +344,8 @@
       {
         isStatic: true,
         angle: floorAngle,
+        friction: 0.02,
+        frictionStatic: 0.05,
         render: { fillStyle: "rgba(120,120,120,0.7)" }
       }
     );
@@ -333,11 +357,12 @@
       80,
       {
         isStatic: true,
+        friction: 0.2,
         render: { fillStyle: "rgba(160,160,160,0.7)" }
       }
     );
 
-    // わずかな斜面
+    // わずかな斜面 (テスト用)
     const gentleSlope = Bodies.rectangle(
       canvasWidth / 2,
       canvasHeight / 2 + 80,
@@ -345,7 +370,9 @@
       10,
       {
         isStatic: true,
-        angle: REBA_TEST_SLOPE_ANGLE,
+        angle: 0.04,
+        friction: 0.01,
+        frictionStatic: 0.02,
         render: { fillStyle: "rgba(100,100,100,0.7)" }
       }
     );
@@ -353,7 +380,7 @@
     Composite.add(world, [leftWall, rightWall, ceiling, slopedFloor, cornerPost, gentleSlope]);
 
     // ============================================================
-    // 棒編集（運営専用）
+    // 棒（線分）編集機能（運営モード）
     // ============================================================
     const stickBodies = [];
     let isAdmin = false;
@@ -367,6 +394,7 @@
     const resetSticksBtn     = document.getElementById("resetSticks");
     const stickThicknessInput= document.getElementById("stickThickness");
     const stickThicknessLabel= document.getElementById("stickThicknessLabel");
+    const adminInnerEl       = document.getElementById("adminInner");
 
     let currentStickThickness = parseInt(stickThicknessInput.value, 10) || 20;
     stickThicknessLabel.textContent = currentStickThickness;
@@ -381,9 +409,13 @@
         isAdmin = true;
         adminStatusEl.textContent = "ログイン中（運営モード）";
         adminPanelEl.classList.remove("disabled");
-        adminPanelEl.style.display = "block"; // 運営 UI 全表示
+        adminInnerEl.classList.remove("admin-only");
+        adminInnerEl.classList.add("admin-visible");
       } else {
+        isAdmin = false;
         adminStatusEl.textContent = "パスワード不正";
+        adminInnerEl.classList.add("admin-only");
+        adminInnerEl.classList.remove("admin-visible");
       }
     });
 
@@ -396,13 +428,12 @@
 
     resetSticksBtn.addEventListener("click", () => {
       if (!isAdmin) return;
-      for (const b of stickBodies) {
-        Composite.remove(world, b);
-      }
+      for (const b of stickBodies) Composite.remove(world, b);
       stickBodies.length = 0;
       pendingPoint = null;
     });
 
+    // canvas クリックで棒を追加
     const mouse = Mouse.create(render.canvas);
     const mouseConstraint = MouseConstraint.create(engine, {
       mouse,
@@ -419,7 +450,6 @@
       const rect = render.canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-
       if (!pendingPoint) {
         pendingPoint = { x, y };
       } else {
@@ -433,7 +463,6 @@
         const dy = y2 - y1;
         const length = Math.sqrt(dx * dx + dy * dy);
         const angle = Math.atan2(dy, dx);
-
         const stick = Bodies.rectangle(
           cx,
           cy,
@@ -442,6 +471,8 @@
           {
             isStatic: true,
             angle: angle,
+            friction: 0.02,
+            frictionStatic: 0.05,
             render: { fillStyle: "rgba(180,180,180,0.8)" }
           }
         );
@@ -470,7 +501,6 @@
         }
       });
     }
-
     function addCoinAt(x, y) {
       const c = createCoin(x, y);
       coins.push(c);
@@ -479,340 +509,284 @@
     }
 
     // ============================================================
-    // レバー / スポーン / 飛ばす範囲 可視化
+    // レバー＆スポーン 複数管理
     // ============================================================
-    const leverContainerEl = document.getElementById("leverContainer");
-    const globalAddCoinBtn = document.getElementById("addCoinGlobal");
-    const resetAllCoinsBtn = document.getElementById("resetAllCoins");
-    const gravityInput = document.getElementById("gravity");
+    // leverConfigs[ index ] = { spawnX, spawnY, leverX, leverY, launchDeg, maxPower }
+    const leverConfigs = [];
+    leverConfigs.push({ ...DEFAULT_LEVER_CONFIG });
+    let currentLeverIndex = 0;
 
+    const leverIndexSelect = document.getElementById("leverIndexSelect");
+    const addLeverConfigBtn = document.getElementById("addLeverConfig");
+    const spawnXInput = document.getElementById("spawnX");
+    const spawnYInput = document.getElementById("spawnY");
+    const leverXInput = document.getElementById("leverX");
+    const leverYInput = document.getElementById("leverY");
+    const launchDegInput = document.getElementById("launchDeg");
+    const launchPowerInput = document.getElementById("launchPower");
+    const applyLeverConfigBtn = document.getElementById("applyLeverConfig");
+    const resetLeverPosBtn = document.getElementById("resetLeverPos");
+    const resetSpawnPosBtn = document.getElementById("resetSpawnPos");
+
+    function refreshLeverIndexSelect() {
+      leverIndexSelect.innerHTML = "";
+      leverConfigs.forEach((cfg, i) => {
+        const opt = document.createElement("option");
+        opt.value = i;
+        opt.textContent = (i + 1) + "番";
+        leverIndexSelect.appendChild(opt);
+      });
+      leverIndexSelect.value = currentLeverIndex;
+    }
+    function loadLeverConfigToInputs() {
+      const cfg = leverConfigs[currentLeverIndex];
+      spawnXInput.value = cfg.spawnX;
+      spawnYInput.value = cfg.spawnY;
+      leverXInput.value = cfg.leverX;
+      leverYInput.value = cfg.leverY;
+      launchDegInput.value = cfg.launchDeg;
+      launchPowerInput.value = cfg.maxPower;
+    }
+
+    leverIndexSelect.addEventListener("change", () => {
+      currentLeverIndex = parseInt(leverIndexSelect.value, 10) || 0;
+      loadLeverConfigToInputs();
+      drawLaunchArea();
+    });
+
+    addLeverConfigBtn.addEventListener("click", () => {
+      if (!isAdmin) return;
+      leverConfigs.push({ ...DEFAULT_LEVER_CONFIG });
+      currentLeverIndex = leverConfigs.length - 1;
+      refreshLeverIndexSelect();
+      loadLeverConfigToInputs();
+      drawLaunchArea();
+    });
+
+    applyLeverConfigBtn.addEventListener("click", () => {
+      if (!isAdmin) return;
+      const cfg = leverConfigs[currentLeverIndex];
+      cfg.spawnX = parseFloat(spawnXInput.value) || cfg.spawnX;
+      cfg.spawnY = parseFloat(spawnYInput.value) || cfg.spawnY;
+      cfg.leverX = parseFloat(leverXInput.value) || cfg.leverX;
+      cfg.leverY = parseFloat(leverYInput.value) || cfg.leverY;
+      cfg.launchDeg = parseFloat(launchDegInput.value) || cfg.launchDeg;
+      cfg.maxPower = parseFloat(launchPowerInput.value) || cfg.maxPower;
+      drawLaunchArea();
+    });
+
+    resetLeverPosBtn.addEventListener("click", () => {
+      if (!isAdmin) return;
+      const cfg = leverConfigs[currentLeverIndex];
+      cfg.leverX = DEFAULT_LEVER_CONFIG.leverX;
+      cfg.leverY = DEFAULT_LEVER_CONFIG.leverY;
+      loadLeverConfigToInputs();
+      drawLaunchArea();
+    });
+
+    resetSpawnPosBtn.addEventListener("click", () => {
+      if (!isAdmin) return;
+      const cfg = leverConfigs[currentLeverIndex];
+      cfg.spawnX = DEFAULT_LEVER_CONFIG.spawnX;
+      cfg.spawnY = DEFAULT_LEVER_CONFIG.spawnY;
+      loadLeverConfigToInputs();
+      drawLaunchArea();
+    });
+
+    refreshLeverIndexSelect();
+    loadLeverConfigToInputs();
+
+    // 初期状態で、1番レバーのスポーン位置に10円を1個
+    addCoinAt(leverConfigs[0].spawnX, leverConfigs[0].spawnY);
+
+    // 発射台の見た目（スリット）は「現行レバー1番」の位置に合わせる
+    function createLaunchSlotBodies(cfg) {
+      const blockThickness = 20;
+      const baseBlockWidth = 80;
+      const upper = Bodies.rectangle(
+        cfg.spawnX,
+        cfg.spawnY - COIN_RADIUS - 5,
+        baseBlockWidth,
+        blockThickness,
+        { isStatic: true, render: { fillStyle: "rgba(60,60,60,0.8)" } }
+      );
+      const lower = Bodies.rectangle(
+        cfg.spawnX,
+        cfg.spawnY + COIN_RADIUS + 5,
+        baseBlockWidth,
+        blockThickness,
+        { isStatic: true, render: { fillStyle: "rgba(60,60,60,0.8)" } }
+      );
+      const left = Bodies.rectangle(
+        cfg.spawnX - baseBlockWidth / 2 + 10,
+        cfg.spawnY,
+        20,
+        COIN_RADIUS * 4,
+        { isStatic: true, render: { fillStyle: "rgba(60,60,60,0.8)" } }
+      );
+      return [upper, lower, left];
+    }
+    const slotBodies = createLaunchSlotBodies(leverConfigs[0]);
+    Composite.add(world, slotBodies);
+
+    // ============================================================
+    // レバー UI ロジック（単一レバーUIだが、パワーは「現在選択中レバー」の設定を使用）
+    // ============================================================
+    const leverEl = document.getElementById("lever");
+    const angleTextEl = document.getElementById("angleText");
+    const powerTextEl = document.getElementById("powerText");
+    const gravityInput = document.getElementById("gravity");
+    const addCoinBtn = document.getElementById("addCoin");
+    const resetWorldBtn = document.getElementById("resetWorld");
+
+    let leverAngleDeg = 0;
+    let isDraggingLever = false;
+    let dragStartY = 0;
+    let dragStartAngle = 0;
+
+    function calcPullPower() {
+      const normalized = leverAngleDeg / REBA_MAX_ANGLE_DEG;
+      return Math.pow(normalized, REBA_HEAVINESS_EXPONENT);
+    }
+    function updateLeverVisual() {
+      leverEl.style.transform = `translateX(-50%) rotate(${leverAngleDeg}deg)`;
+      angleTextEl.textContent = leverAngleDeg.toFixed(1);
+      powerTextEl.textContent = calcPullPower().toFixed(2);
+    }
+
+    function getLaunchDirection(cfg) {
+      const rad = cfg.launchDeg * Math.PI / 180;
+      return { x: Math.cos(rad), y: Math.sin(rad) };
+    }
+    function getLaunchPower(cfg) {
+      return calcPullPower() * cfg.maxPower;
+    }
+
+    function releaseLeverAndLaunch() {
+      const cfg = leverConfigs[currentLeverIndex];
+      const power = getLaunchPower(cfg);
+      if (power <= 0.1) {
+        leverAngleDeg = 0;
+        updateLeverVisual();
+        return;
+      }
+      const dir = getLaunchDirection(cfg);
+      coins.forEach(c => {
+        const dx = c.position.x - cfg.spawnX;
+        const dy = c.position.y - cfg.spawnY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < REBA_LAUNCH_RADIUS) {
+          const vx = dir.x * power;
+          const vy = dir.y * power;
+          Body.setVelocity(c, { x: vx, y: vy });
+        }
+      });
+      leverAngleDeg = 0;
+      updateLeverVisual();
+    }
+
+    function startDragLever(y) {
+      isDraggingLever = true;
+      dragStartY = y;
+      dragStartAngle = leverAngleDeg;
+    }
+    function moveDragLever(y) {
+      if (!isDraggingLever) return;
+      const dy = y - dragStartY;
+      let newAngle = dragStartAngle + dy * REBA_DRAG_SENSITIVITY;
+      newAngle = Math.max(0, Math.min(REBA_MAX_ANGLE_DEG, newAngle));
+      leverAngleDeg = newAngle;
+      updateLeverVisual();
+    }
+    function endDragLever() {
+      if (!isDraggingLever) return;
+      isDraggingLever = false;
+      releaseLeverAndLaunch();
+    }
+
+    leverEl.addEventListener("mousedown", e => {
+      e.preventDefault();
+      startDragLever(e.clientY);
+    });
+    window.addEventListener("mousemove", e => {
+      if (!isDraggingLever) return;
+      e.preventDefault();
+      moveDragLever(e.clientY);
+    });
+    window.addEventListener("mouseup", e => {
+      if (!isDraggingLever) return;
+      e.preventDefault();
+      endDragLever();
+    });
+
+    leverEl.addEventListener("touchstart", e => {
+      e.preventDefault();
+      const t = e.touches[0];
+      startDragLever(t.clientY);
+    }, { passive: false });
+    window.addEventListener("touchmove", e => {
+      if (!isDraggingLever) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      moveDragLever(t.clientY);
+    }, { passive: false });
+    window.addEventListener("touchend", e => {
+      if (!isDraggingLever) return;
+      e.preventDefault();
+      endDragLever();
+    }, { passive: false });
+
+    updateLeverVisual();
+
+    // ============================================================
+    // 「飛ばす範囲」を緑円で表示
+    // ============================================================
+    function drawLaunchArea() {
+      const ctx = render.context;
+      if (!ctx) return;
+      // Matter.js が描画する前にフックして描くのが本当は良いが、
+      // 手軽にするため requestAnimationFrame で上書きしていく。
+    }
+    // Matter.Render には beforeRender / afterRender が無いので、
+    // 独自に overlay を描く（簡易版）
+    (function renderOverlay() {
+      requestAnimationFrame(renderOverlay);
+      const ctx = render.context;
+      if (!ctx) return;
+      ctx.save();
+      // 既にMatter.jsが描いた後に上書きするので、単に円を描く
+      const cfg = leverConfigs[currentLeverIndex];
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(0,255,0,0.5)";
+      ctx.lineWidth = 2;
+      ctx.arc(cfg.spawnX, cfg.spawnY, REBA_LAUNCH_RADIUS, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    })();
+
+    // ============================================================
+    // UI ボタン
+    // ============================================================
     gravityInput.addEventListener("input", e => {
       const g = parseFloat(e.target.value) || 0;
       engine.world.gravity.y = g;
     });
 
-    globalAddCoinBtn.addEventListener("click", () => {
-      // 適当に中央付近に追加
-      addCoinAt(canvasWidth / 2, canvasHeight / 2);
+    addCoinBtn.addEventListener("click", () => {
+      const cfg = leverConfigs[currentLeverIndex];
+      const x = cfg.spawnX + (Math.random() * 20 - 10);
+      const y = cfg.spawnY + (Math.random() * 10 - 5);
+      addCoinAt(x, y);
     });
 
-    if (resetAllCoinsBtn) {
-      resetAllCoinsBtn.addEventListener("click", () => {
-        coins.forEach(c => Composite.remove(world, c));
-        coins.length = 0;
+    resetWorldBtn.addEventListener("click", () => {
+      coins.forEach(c => Composite.remove(world, c));
+      coins.length = 0;
+      leverConfigs.forEach(cfg => {
+        addCoinAt(cfg.spawnX, cfg.spawnY);
       });
-    }
-
-    // レバーごとの状態
-    const leverStates = [];
-
-    function createLeverUIAndLogic(config) {
-      // UIブロック
-      const wrapper = document.createElement("div");
-      wrapper.className = "leverConfig";
-
-      const title = document.createElement("div");
-      title.className = "leverConfigTitle";
-      title.textContent = config.label + "（ID " + config.id + "）";
-      wrapper.appendChild(title);
-
-      // レバー UI エリア
-      const leverArea = document.createElement("div");
-      leverArea.className = "leverArea";
-      const leverEl = document.createElement("div");
-      leverEl.className = "lever";
-      const leverLabel = document.createElement("div");
-      leverLabel.className = "leverLabel";
-      leverLabel.textContent = "レバー";
-      leverArea.appendChild(leverEl);
-      leverArea.appendChild(leverLabel);
-      wrapper.appendChild(leverArea);
-
-      // 情報表示
-      const info = document.createElement("div");
-      info.innerHTML = `
-        角度: <span class="angleText">0</span>° /
-        引き: <span class="powerText">0.00</span>
-      `;
-      wrapper.appendChild(info);
-
-      // スポーン位置・発射位置・向き・強さ
-      const coordBlock = document.createElement("div");
-      coordBlock.innerHTML = `
-        <div>スポーン位置 X:<input class="spawnX" type="number" value="${config.spawnX}">
-             Y:<input class="spawnY" type="number" value="${config.spawnY}"></div>
-        <div>レバー発射位置 X:<input class="launchX" type="number" value="${config.launchX}">
-             Y:<input class="launchY" type="number" value="${config.launchY}"></div>
-        <div>打ち出し角度(度):<input class="angleLaunch" type="number" value="${config.launchAngleDeg}">
-        </div>
-        <div>最大強さ:<input class="maxSpeed" type="number" value="${config.maxLaunchSpeed}">
-        </div>
-        <div>範囲半径:<input class="radius" type="number" value="${config.launchRadius}">
-        </div>
-        <div>
-          <button class="spawnCoin">スポーン位置に10円追加</button>
-          <button class="resetSpawnCoin">スポーン位置リセット</button>
-          <button class="resetLever">レバー角度リセット</button>
-        </div>
-      `;
-      wrapper.appendChild(coordBlock);
-
-      leverContainerEl.appendChild(wrapper);
-
-      // 要素取得
-      const angleTextEl = info.querySelector(".angleText");
-      const powerTextEl = info.querySelector(".powerText");
-      const spawnXEl    = coordBlock.querySelector(".spawnX");
-      const spawnYEl    = coordBlock.querySelector(".spawnY");
-      const launchXEl   = coordBlock.querySelector(".launchX");
-      const launchYEl   = coordBlock.querySelector(".launchY");
-      const angleLaunchEl = coordBlock.querySelector(".angleLaunch");
-      const maxSpeedEl  = coordBlock.querySelector(".maxSpeed");
-      const radiusEl    = coordBlock.querySelector(".radius");
-      const spawnCoinBtn= coordBlock.querySelector(".spawnCoin");
-      const resetSpawnCoinBtn = coordBlock.querySelector(".resetSpawnCoin");
-      const resetLeverBtn = coordBlock.querySelector(".resetLever");
-
-      // 状態
-      const state = {
-        id: config.id,
-        angleDeg: 0,
-        spawnX: config.spawnX,
-        spawnY: config.spawnY,
-        launchX: config.launchX,
-        launchY: config.launchY,
-        launchAngleDeg: config.launchAngleDeg,
-        maxLaunchSpeed: config.maxLaunchSpeed,
-        launchRadius: config.launchRadius,
-        isDragging: false,
-        dragStartY: 0,
-        dragStartAngle: 0,
-        leverEl,
-        angleTextEl,
-        powerTextEl
-      };
-      leverStates.push(state);
-
-      function calcPullPower() {
-        const normalized = state.angleDeg / REBA_MAX_ANGLE_DEG;
-        return Math.pow(normalized, REBA_HEAVINESS_EXPONENT);
-      }
-
-      function updateLeverVisual() {
-        leverEl.style.transform = `translateX(-50%) rotate(${state.angleDeg}deg)`;
-        angleTextEl.textContent = state.angleDeg.toFixed(1);
-        powerTextEl.textContent = calcPullPower().toFixed(2);
-      }
-
-      function getLaunchDirection() {
-        const rad = state.launchAngleDeg * Math.PI / 180;
-        return { x: Math.cos(rad), y: Math.sin(rad) };
-      }
-
-      function getLaunchPower() {
-        return calcPullPower() * state.maxLaunchSpeed;
-      }
-
-      function releaseLeverAndLaunch() {
-        const power = getLaunchPower();
-        if (power <= 0.1) {
-          state.angleDeg = 0;
-          updateLeverVisual();
-          return;
-        }
-        const dir = getLaunchDirection();
-        coins.forEach(c => {
-          const dx = c.position.x - state.launchX;
-          const dy = c.position.y - state.launchY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < state.launchRadius) {
-            const vx = dir.x * power;
-            const vy = dir.y * power;
-            Body.setVelocity(c, { x: vx, y: vy });
-          }
-        });
-        state.angleDeg = 0;
-        updateLeverVisual();
-      }
-
-      function startDragLever(y) {
-        state.isDragging = true;
-        state.dragStartY = y;
-        state.dragStartAngle = state.angleDeg;
-      }
-      function moveDragLever(y) {
-        if (!state.isDragging) return;
-        const dy = y - state.dragStartY;
-        let newAngle = state.dragStartAngle + dy * REBA_DRAG_SENSITIVITY;
-        newAngle = Math.max(0, Math.min(REBA_MAX_ANGLE_DEG, newAngle));
-        state.angleDeg = newAngle;
-        updateLeverVisual();
-      }
-      function endDragLever() {
-        if (!state.isDragging) return;
-        state.isDragging = false;
-        releaseLeverAndLaunch();
-      }
-
-      // レバー UI イベント
-      leverEl.addEventListener("mousedown", e => {
-        e.preventDefault();
-        startDragLever(e.clientY);
-      });
-      window.addEventListener("mousemove", e => {
-        if (!state.isDragging) return;
-        e.preventDefault();
-        moveDragLever(e.clientY);
-      });
-      window.addEventListener("mouseup", e => {
-        if (!state.isDragging) return;
-        e.preventDefault();
-        endDragLever();
-      });
-
-      leverEl.addEventListener("touchstart", e => {
-        e.preventDefault();
-        const t = e.touches[0];
-        startDragLever(t.clientY);
-      }, { passive: false });
-      window.addEventListener("touchmove", e => {
-        if (!state.isDragging) return;
-        e.preventDefault();
-        const t = e.touches[0];
-        moveDragLever(t.clientY);
-      }, { passive: false });
-      window.addEventListener("touchend", e => {
-        if (!state.isDragging) return;
-        e.preventDefault();
-        endDragLever();
-      }, { passive: false });
-
-      // 入力変更 → state 更新
-      function syncInputsToState() {
-        state.spawnX        = parseFloat(spawnXEl.value)    || state.spawnX;
-        state.spawnY        = parseFloat(spawnYEl.value)    || state.spawnY;
-        state.launchX       = parseFloat(launchXEl.value)   || state.launchX;
-        state.launchY       = parseFloat(launchYEl.value)   || state.launchY;
-        state.launchAngleDeg= parseFloat(angleLaunchEl.value)|| state.launchAngleDeg;
-        state.maxLaunchSpeed= parseFloat(maxSpeedEl.value)  || state.maxLaunchSpeed;
-        state.launchRadius  = parseFloat(radiusEl.value)    || state.launchRadius;
-      }
-
-      [spawnXEl, spawnYEl, launchXEl, launchYEl, angleLaunchEl, maxSpeedEl, radiusEl]
-        .forEach(inp => {
-          inp.addEventListener("change", syncInputsToState);
-        });
-
-      // スポーン位置に10円追加
-      spawnCoinBtn.addEventListener("click", () => {
-        syncInputsToState();
-        addCoinAt(state.spawnX, state.spawnY);
-      });
-
-      // スポーン位置リセット → そこに1枚だけ置き直す
-      resetSpawnCoinBtn.addEventListener("click", () => {
-        syncInputsToState();
-        coins.forEach(c => {
-          const dx = c.position.x - state.spawnX;
-          const dy = c.position.y - state.spawnY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < 40) {
-            Composite.remove(world, c);
-          }
-        });
-        addCoinAt(state.spawnX, state.spawnY);
-      });
-
-      // レバー角度だけリセット
-      resetLeverBtn.addEventListener("click", () => {
-        state.angleDeg = 0;
-        updateLeverVisual();
-      });
-
+      leverAngleDeg = 0;
       updateLeverVisual();
-    }
-
-    // レバーを生成
-    initialLevers.forEach(cfg => createLeverUIAndLogic(cfg));
-
-    // 初期：レバー1のスポーン位置に 1 枚置いておく
-    addCoinAt(initialLevers[0].spawnX, initialLevers[0].spawnY);
-
-    // ============================================================
-    // 「飛ばす範囲」を緑円で表示（デバッグレンダラー）
-    // ============================================================
-    // Matter.Render の beforeRender を使って、円を描画
-    (function patchRenderForLaunchAreas() {
-      const originalRender = render;
-      const _render = originalRender;
-      const ctx = _render.context;
-      const _renderWorld = Render.world;
-      Render.world = function(engine) {
-        _renderWorld.call(Render, engine);
-        // 範囲を描画
-        ctx.save();
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = "rgba(0,255,0,0.7)";
-        leverStates.forEach(st => {
-          ctx.beginPath();
-          ctx.arc(st.launchX, st.launchY, st.launchRadius, 0, Math.PI * 2);
-          ctx.stroke();
-        });
-        ctx.restore();
-      };
-    })();
-
-    // ============================================================
-    // 斜面に応じた「追加の転がり力」
-    // ============================================================
-    // 接触している床の法線ベクトルから「下向き成分」を見て、
-    // それに応じてコインに力を加える。
-    Matter.Events.on(engine, "beforeUpdate", () => {
-      const pairs = engine.pairs.list;
-      for (const pair of pairs) {
-        const { bodyA, bodyB, collision } = pair;
-
-        const coin = (bodyA.isStatic ? bodyB : bodyA);
-        const other = (coin === bodyA ? bodyB : bodyA);
-
-        if (coin.label !== "Circle Body") continue; // 簡易: コインだけ対象
-        if (!other.isStatic) continue; // 静的床のときだけ
-
-        // collision.normal は「A から B へ���法線」なので、向きに注意
-        // ここでは、床の法線ベクトルを n とし、重力(0,1)との内積で
-        // 「どれだけ下向き成分があるか」を見る。
-        const n = collision.normal;
-        const dot = n.x * 0 + n.y * 1; // 下向きとの内積
-
-        // dot が +1 に近いほど「真下向きの法線」＝床が真上向き（水平）
-        // 床の「下り方向」は、接線ベクトル (t) を使って、重力の成分を投影した方向で求められる。
-        // t を ( -n.y, n.x ) として接線を取り、その向きに沿って小さな力を加える。
-        const t = { x: -n.y, y: n.x }; // 床に沿う向き（左右どちらか）
-
-        // 重力ベクトル g=(0,1) の t 方向成分: g_t = (g·t) * t
-        const gDotT = 0 * t.x + 1 * t.y;
-        const slopeAlong = { x: t.x * gDotT, y: t.y * gDotT };
-
-        // これをもとに、コインに力を追加
-        const mag = Math.sqrt(slopeAlong.x * slopeAlong.x + slopeAlong.y * slopeAlong.y);
-        if (mag > 0) {
-          // 下り方向だけ効くように（gDotT > 0 のとき）
-          if (gDotT > 0) {
-            const fx = slopeAlong.x * SLOPE_BOOST_FACTOR * coin.mass;
-            const fy = slopeAlong.y * SLOPE_BOOST_FACTOR * coin.mass;
-            Body.applyForce(coin, coin.position, { x: fx, y: fy });
-          }
-        }
-      }
-    });
-
-    // ============================================================
-    // ウィンドウリサイズ（必要ならリロード）
-    // ============================================================
-    window.addEventListener("resize", () => {
-      // 本格対応するならここで再レイアウトが必要。
-      // 必要なら location.reload() を有効化。
-      // location.reload();
     });
   </script>
 </body>
