@@ -318,7 +318,13 @@
     const dx = lineEnd.x - lineStart.x;
     const dy = lineEnd.y - lineStart.y;
     const norm = Math.hypot(dx, dy);
-    if (norm < LINE_DEGENERATE_EPSILON) return Math.hypot(point.x - lineStart.x, point.y - lineStart.y);
+    if (norm < LINE_DEGENERATE_EPSILON) {
+      // For degenerate lines, return distance to nearest endpoint
+      return Math.min(
+        Math.hypot(point.x - lineStart.x, point.y - lineStart.y),
+        Math.hypot(point.x - lineEnd.x, point.y - lineEnd.y)
+      );
+    }
     
     const t = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / (norm * norm);
     const projX = lineStart.x + t * dx;
