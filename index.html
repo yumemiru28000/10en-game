@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>10円 vs 坂1本 物理テスト</title>
+  <title>10円 vs 坂1本 物理��スト（map付き）</title>
   <style>
     body {
       margin: 0;
@@ -31,8 +31,9 @@
 </head>
 <body>
   <div id="info">
-    左クリック2回で坂の始点・終点を指定 → 「10円リセット」で坂の上に乗せる → 再生<br>
-    坂の角度に応じて自然に転がり、緩ければ止まるように調整済み。
+    ・キャンバスを2回クリック → 坂の始点・終点を指定（map.png 上）<br>
+    ・「10円リセット」で坂の上に乗せる → 再生<br>
+    ・map.png を背景にしたまま、円 vs 坂1本 の完璧物理が動きます。
   </div>
   <div id="canvasWrapper">
     <canvas id="gameCanvas" width="600" height="400"></canvas>
@@ -54,9 +55,13 @@
     const resetCoinBtn = document.getElementById("resetCoinBtn");
     const playPauseBtn = document.getElementById("playPauseBtn");
 
+    // === map.png （背景用） ===
+    const bgImage = new Image();
+    bgImage.src = "https://raw.githubusercontent.com/yumemiru28000/10en-game/main/map.png";
+
     let GRAVITY = parseFloat(gravityInput.value) || 0.5; // 下向き重力（px/frame^2）
     let SLOPE_FRICTION = parseFloat(frictionInput.value) || 0.02; // 坂上摩擦（動摩擦）
-    let STATIC_THRESHOLD = parseFloat(staticInput.value) || 0.02; // 静止摩擦閾値（加速度）
+    let STATIC_THRESHOLD = parseFloat(staticInput.value) || 0.02; // 静止摩擦閾値
 
     gravityInput.addEventListener("input", () => {
       GRAVITY = parseFloat(gravityInput.value) || GRAVITY;
@@ -105,13 +110,12 @@
         coin.x = canvas.width/2;
         coin.y = 50;
       } else {
-        // 坂の中点に置く + 少し上にオフセット
         const mx = (slope.x1 + slope.x2)/2;
         const my = (slope.y1 + slope.y2)/2;
         const dx = slope.x2 - slope.x1;
         const dy = slope.y2 - slope.y1;
         const len = Math.sqrt(dx*dx + dy*dy) || 1;
-        const nx = -(dy/len); // 法線（上向き寄り）
+        const nx = -(dy/len);
         const ny =  (dx/len);
         coin.x = mx + nx * coin.r;
         coin.y = my + ny * coin.r;
@@ -126,7 +130,7 @@
       playPauseBtn.textContent = paused ? "再生" : "一時停止";
     });
 
-    // 距離判定用：点 C と線分 AB の最近点 P と距離 d を返す
+    // 点 C と線分 AB の最近点と距離
     function closestPointOnSegment(ax, ay, bx, by, cx, cy) {
       const abx = bx - ax;
       const aby = by - ay;
@@ -146,65 +150,65 @@
     function updatePhysics() {
       if (paused) return;
 
-      // 1. 重力で加速
+      // 1. 重力
       coin.vy += GRAVITY;
 
-      // 2. 位置更新（まずは自由落下）
+      // 2. 移動
       const prevX = coin.x;
       const prevY = coin.y;
       coin.x += coin.vx;
       coin.y += coin.vy;
 
+      // 3. 坂との衝突・接触処理
       if (slope.hasSlope) {
-        // 3. 円 vs 坂線分 の距離を計���
         const { px, py, d } = closestPointOnSegment(
           slope.x1, slope.y1, slope.x2, slope.y2,
           coin.x, coin.y
         );
 
         if (d < coin.r) {
-          // 衝突中：坂の法線と接線（単位ベクトル）を計算
+          // 坂の接線・法線
           const dx = slope.x2 - slope.x1;
           const dy = slope.y2 - slope.y1;
           const len = Math.sqrt(dx*dx + dy*dy) || 1;
-          const tx = dx / len;       // 接線（坂に沿う方向, 右向き）
+          const tx = dx / len;
           const ty = dy / len;
-          const nx = -(ty);          // 法線（坂の外側：ここでは「上側」を想定）
-          const ny =  (tx);
+          const nx = -ty;
+          const ny =  tx;
 
-          // 円を坂の外側に押し出す（MTD）
+          // 円を外側へ押し出す（MTD）
           const penetration = coin.r - d;
           coin.x += nx * penetration;
           coin.y += ny * penetration;
 
-          // 速度を接線/法線に分解
+          // 速度を分解
           const vpx = coin.vx;
           const vpy = coin.vy;
-          const v_parallel = vpx * tx + vpy * ty;  // 接線成分（スカラー）
-          let v_normal   = vpx * nx + vpy * ny;    // 法線成分（スカラー）
+          const v_parallel = vpx * tx + vpy * ty;
+          let v_normal   = vpx * nx + vpy * ny;
 
-          // 法線方向速度は坂が受け止める：0 に近づける
+          // 法線方向速度は 0（坂が受け止める）
           v_normal = 0;
 
-          // 接線方向の重力加速度 a_parallel = g・t
-          const g_parallel = GRAVITY * ty; // g=(0,GRAVITY) なので dot(g,t) = GRAVITY*ty
+          // 坂に沿った重力加速度
+          const g_parallel = GRAVITY * ty; // g=(0,G) → dot(g,t) = G*ty
           let new_v_parallel = v_parallel + g_parallel;
 
-          // 静止摩擦：加速度と速度が小さいなら止める
+          // 静止摩擦：加速度 & 速度が小さいときは止める
           if (Math.abs(g_parallel) < STATIC_THRESHOLD && Math.abs(v_parallel) < STATIC_THRESHOLD) {
             new_v_parallel = 0;
           } else {
-            // 動摩擦：少し減衰
+            // 動摩擦
             new_v_parallel *= (1 - SLOPE_FRICTION);
           }
 
-          // 接線＋法線に戻す
+          // 合成して戻す
           coin.vx = new_v_parallel * tx + v_normal * nx;
           coin.vy = new_v_parallel * ty + v_normal * ny;
         }
       }
 
-      // 4. 画面の枠でバウンド（テスト用）
+      // 4. 画面枠でバウンド（テスト）
       const bounce = 0.3;
       if (coin.x - coin.r < 0) {
         coin.x = coin.r;
@@ -225,7 +229,11 @@
     }
 
     function draw() {
+      // 背景：map.png
       ctx.clearRect(0,0,canvas.width,canvas.height);
+      if (bgImage.complete) {
+        ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+      }
 
       // 坂
       if (slope.hasSlope || slopeClickStage === 1) {
@@ -237,7 +245,7 @@
         ctx.stroke();
       }
 
-      // 円
+      // 10円
       ctx.save();
       ctx.translate(coin.x, coin.y);
       ctx.fillStyle = "#cc8844";
@@ -251,7 +259,7 @@
       ctx.fillText("10",0,0);
       ctx.restore();
 
-      // デバッグ用：速度ベクトル
+      // 速度ベクトル（デバッグ）
       ctx.strokeStyle = "#ff00ff";
       ctx.beginPath();
       ctx.moveTo(coin.x, coin.y);
