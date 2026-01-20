@@ -114,60 +114,6 @@
       background: #000;
     }
 
-    /* レバーエリア：reba1画像の横にスライダーを置く */
-    #leverRow {
-      margin-top: 8px;
-      display: flex;
-      justify-content: space-between;
-      gap: 8px;
-    }
-
-    .lever-column {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .lever-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .lever-visual-img {
-      width: 40px;
-      height: 40px;
-      background: #111;
-      border-radius: 999px;
-      border: 1px solid #666;
-      overflow: hidden;
-      position: relative;
-      flex-shrink: 0;
-    }
-
-    .lever-stick {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      width: 4px;
-      height: 18px;
-      background: #ccc;
-      transform-origin: bottom center;
-      transform: translate(-50%, 0) rotate(0deg);
-    }
-
-    .lever-slider {
-      flex: 1;
-    }
-
-    .lever-label {
-      font-size: 11px;
-      opacity: 0.8;
-      width: 32px;
-      text-align: right;
-    }
-
     .top-right-menu {
       position: fixed;
       top: 8px;
@@ -185,6 +131,57 @@
       font-size: 20px;
       letter-spacing: 0.1em;
       margin-bottom: 8px;
+    }
+
+    /* レバー：reba1 の位置の横にバーを置くためのコンテナ */
+    #leverOverlay {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none; /* スライダーだけにイベントを通す */
+    }
+
+    .lever-ui {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      pointer-events: auto;
+    }
+
+    .lever-image {
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid #666;
+      background: #111;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .lever-stick {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 4px;
+      height: 18px;
+      background: #ccc;
+      transform-origin: bottom center;
+      transform: translate(-50%, 0) rotate(0deg);
+    }
+
+    .lever-slider {
+      width: 70px;
+    }
+
+    .lever-label {
+      font-size: 10px;
+      opacity: 0.9;
+      min-width: 20px;
+      text-align: left;
     }
   </style>
 </head>
@@ -227,18 +224,14 @@
 
     <div id="gameContainer">
       <canvas id="gameCanvas" width="282" height="521"></canvas>
+      <!-- レバーUIをキャンバス上に重ねる -->
+      <div id="leverOverlay"></div>
     </div>
 
     <div class="center" style="margin-top:8px;">
       <button id="insertCoinBtn">10円を入れる</button>
       <button id="waitBtn">待機する</button>
       <button id="endGameBtn">ゲームを終わる</button>
-    </div>
-
-    <!-- レバー：左右3本ずつ -->
-    <div id="leverRow">
-      <div class="lever-column" id="leftLevers"></div>
-      <div class="lever-column" id="rightLevers"></div>
     </div>
 
     <div class="msg" id="infoMsg"></div>
@@ -311,11 +304,9 @@
   document.getElementById('toNameInputBtn').addEventListener('click', () => {
     showScreen('name');
   });
-
   document.getElementById('toJankenBtn').addEventListener('click', () => {
     showScreen('janken');
   });
-
   document.getElementById('backToMenuBtn').addEventListener('click', () => {
     showScreen('menu');
   });
@@ -327,9 +318,7 @@
   const decideNameBtn = document.getElementById('decideNameBtn');
 
   let myName = localStorage.getItem('10yen_name') || '';
-  if (myName) {
-    nameInput.value = myName;
-  }
+  if (myName) nameInput.value = myName;
 
   decideNameBtn.addEventListener('click', () => {
     const v = nameInput.value.trim();
@@ -339,7 +328,7 @@
   });
 
   // ==========================
-  // 10円ゲーム：Firebase 状態
+  // Firebase 状態
   // ==========================
   const playingNameEl = document.getElementById('playingName');
   const waitingNamesEl = document.getElementById('waitingNames');
@@ -372,7 +361,7 @@
       endGameBtn.disabled = true;
       setLeverEnabled(false);
     } else if (st === 'B') {
-      stateLabelEl.textContent = `状態：${currentPlaying?.name || '-'} が��戦中（観戦中）`;
+      stateLabelEl.textContent = `状態：${currentPlaying?.name || '-'} が挑戦中（観戦中）`;
       insertCoinBtn.disabled = true;
       waitBtn.disabled = false;
       endGameBtn.disabled = true;
@@ -401,14 +390,13 @@
     });
   }
 
-  onValue(PLAYING_REF, (snapshot) => {
-    const val = snapshot.val();
-    currentPlaying = val || null;
+  onValue(PLAYING_REF, snap => {
+    currentPlaying = snap.val() || null;
     updateUIState();
   });
 
-  onValue(WAITING_REF, (snapshot) => {
-    const val = snapshot.val() || {};
+  onValue(WAITING_REF, snap => {
+    const val = snap.val() || {};
     waitingList = Object.keys(val).map(id => ({
       id,
       name: val[id].name || 'Player'
@@ -428,7 +416,7 @@
     await set(WAITING_REF, {});
     touchAction();
     infoMsgEl.textContent = '10円が投入されました。レバーで狙ってください。';
-    spawnCoinAtStart();
+    spawnCoinAtSafeStart();
   });
 
   waitBtn.addEventListener('click', async () => {
@@ -454,21 +442,18 @@
   });
 
   let idleTimer = null;
-  function resetIdleTimer() {
-    if (idleTimer) clearTimeout(idleTimer);
-    if (calcState() === 'C') {
-      idleTimer = setTimeout(async () => {
-        if (calcState() === 'C') {
-          await set(PLAYING_REF, null);
-          infoMsgEl.textContent = '操作がなかったため、自動で終了しました。';
-          resetCoin();
-        }
-      }, 60 * 1000);
-    }
-  }
   ['click', 'input'].forEach(ev => {
     document.addEventListener(ev, () => {
-      if (calcState() === 'C') resetIdleTimer();
+      if (calcState() === 'C') {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(async () => {
+          if (calcState() === 'C') {
+            await set(PLAYING_REF, null);
+            infoMsgEl.textContent = '操作がなかったため、自動で終了しました。';
+            resetCoin();
+          }
+        }, 60 * 1000);
+      }
     });
   });
 
@@ -477,6 +462,7 @@
   // ==========================
   const canvas = document.getElementById('gameCanvas');
   const ctx = canvas.getContext('2d');
+  const leverOverlay = document.getElementById('leverOverlay');
 
   const images = {
     map: null,
@@ -503,10 +489,7 @@
       }
       const img = new Image();
       img.crossOrigin = "anonymous";
-      img.onload = () => {
-        images[key] = img;
-        resolve();
-      };
+      img.onload = () => { images[key] = img; resolve(); };
       img.onerror = reject;
       img.src = url;
     });
@@ -527,81 +510,117 @@
     hitCanvas.height = canvas.height;
 
     if (images.ren) {
-      hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
-      hitCtx.drawImage(images.ren, 0, 0, hitCanvas.width, hitCanvas.height);
-      renData = hitCtx.getImageData(0, 0, hitCanvas.width, hitCanvas.height);
+      hitCtx.clearRect(0,0,hitCanvas.width,hitCanvas.height);
+      hitCtx.drawImage(images.ren,0,0,hitCanvas.width,hitCanvas.height);
+      renData = hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
     }
     if (images.ana) {
-      hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
-      hitCtx.drawImage(images.ana, 0, 0, hitCanvas.width, hitCanvas.height);
-      anaData = hitCtx.getImageData(0, 0, hitCanvas.width, hitCanvas.height);
+      hitCtx.clearRect(0,0,hitCanvas.width,hitCanvas.height);
+      hitCtx.drawImage(images.ana,0,0,hitCanvas.width,hitCanvas.height);
+      anaData = hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
     }
     if (images.atari) {
-      hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
-      hitCtx.drawImage(images.atari, 0, 0, hitCanvas.width, hitCanvas.height);
-      atariData = hitCtx.getImageData(0, 0, hitCanvas.width, hitCanvas.height);
+      hitCtx.clearRect(0,0,hitCanvas.width,hitCanvas.height);
+      hitCtx.drawImage(images.atari,0,0,hitCanvas.width,hitCanvas.height);
+      atariData = hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
     }
     if (images.kaisi) {
-      hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
-      hitCtx.drawImage(images.kaisi, 0, 0, hitCanvas.width, hitCanvas.height);
-      kaisiData = hitCtx.getImageData(0, 0, hitCanvas.width, hitCanvas.height);
-      detectStartPosition();
+      hitCtx.clearRect(0,0,hitCanvas.width,hitCanvas.height);
+      hitCtx.drawImage(images.kaisi,0,0,hitCanvas.width,hitCanvas.height);
+      kaisiData = hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
+      detectStartCandidate();
     }
 
-    setupLevers(); // reba1 を使うのに画像読み込み後の方が安全
+    setupLeversUI();
   }
 
-  function isBlackPixel(imgData, x, y) {
+  function isBlackPixel(imgData,x,y) {
     if (!imgData) return false;
     const ix = Math.floor(x);
     const iy = Math.floor(y);
     if (ix < 0 || iy < 0 || ix >= imgData.width || iy >= imgData.height) return false;
     const idx = (iy * imgData.width + ix) * 4;
     const r = imgData.data[idx];
-    const g = imgData.data[idx + 1];
-    const b = imgData.data[idx + 2];
-    const a = imgData.data[idx + 3];
+    const g = imgData.data[idx+1];
+    const b = imgData.data[idx+2];
+    const a = imgData.data[idx+3];
     if (a < 20) return false;
     const th = 40;
     return (r < th && g < th && b < th);
   }
 
-  // 10円玉：サイズを 4/5 に（元が10なら 8）
+  // 10円玉（表示と当たり判定はこの円）
   const coin = {
-    x: canvas.width / 2,
-    y: canvas.height / 2,
+    x: canvas.width/2,
+    y: canvas.height/2,
     vx: 0,
     vy: 0,
-    r: 8,       // ★ 小さくした
+    r: 8,  // 小さめ
     inPlay: false,
     cleared: false,
     failed: false,
+    angle: 0, // 回転角
   };
 
-  let startPos = { x: canvas.width / 2, y: canvas.height / 2 };
+  let startCandidates = []; // kaisi 黒ピクセル一覧
 
-  function detectStartPosition() {
+  function detectStartCandidate() {
     if (!kaisiData) return;
     const w = kaisiData.width;
     const h = kaisiData.height;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        if (isBlackPixel(kaisiData, x, y)) {
-          startPos = { x, y };
-          return;
+    startCandidates = [];
+    for (let y=0; y<h; y++) {
+      for (let x=0; x<w; x++) {
+        if (isBlackPixel(kaisiData,x,y)) {
+          startCandidates.push({x,y});
         }
       }
     }
+    if (startCandidates.length === 0) {
+      startCandidates.push({x:w/2,y:h/2});
+    }
   }
 
-  function spawnCoinAtStart() {
-    coin.x = startPos.x;
-    coin.y = startPos.y;
+  function spawnCoinAtSafeStart() {
+    // kaisi 黒の中からランダムに取り、そこから少し下探索して「ren と被らない」場所を探す
+    if (startCandidates.length === 0) {
+      coin.x = canvas.width/2;
+      coin.y = canvas.height/2;
+    } else {
+      const cand = startCandidates[Math.floor(Math.random()*startCandidates.length)];
+      let sx = cand.x;
+      let sy = cand.y;
+
+      // 下方向に少しスキャンして「壁が無い」位置を探す
+      for (let dy=0; dy<20; dy++) {
+        const tx = sx;
+        const ty = sy + dy;
+        // 円の外周8点が ren 黒と当たらないかチェック
+        let ok = true;
+        for (let i=0;i<8;i++){
+          const ang = Math.PI*2*i/8;
+          const ex = tx + Math.cos(ang)*coin.r;
+          const ey = ty + Math.sin(ang)*coin.r;
+          if (renData && isBlackPixel(renData,ex,ey)) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) {
+          sx = tx;
+          sy = ty;
+          break;
+        }
+      }
+      coin.x = sx;
+      coin.y = sy;
+    }
     coin.vx = 0;
     coin.vy = 0;
     coin.inPlay = true;
     coin.cleared = false;
     coin.failed = false;
+    coin.angle = 0;
   }
 
   function resetCoin() {
@@ -610,16 +629,16 @@
     coin.failed = false;
   }
 
-  // 重さ4.5g をイメージして「慣性はあるが、重力は地球と同じくらい」に調整
-  const gravity = 0.5;    // px/frame^2 （感覚調整値）
-  const friction = 0.01;  // 空気抵抗
-  const bounce = 0.25;    // 壁に当たったときの反発
+  // 重力など（1.5倍くらい強め）
+  const gravity = 0.7;   // px/frame^2
+  const friction = 0.012;
+  const bounce = 0.25;
 
   function updatePhysics() {
     if (!coin.inPlay) return;
     if (coin.cleared || coin.failed) return;
 
-    // 下向き重力
+    // 重力（常に下）
     coin.vy += gravity;
 
     // 空気抵抗
@@ -629,47 +648,44 @@
     let nextX = coin.x + coin.vx;
     let nextY = coin.y + coin.vy;
 
-    // レーンとの接触を調べて「斜面にそって転がす」
+    // レーン：斜面に沿って転がす（壁を貫通させない）
     if (renData) {
       const sampleCount = 12;
-      let count = 0;
+      let hitCount = 0;
       let nxSum = 0;
       let nySum = 0;
 
-      for (let i = 0; i < sampleCount; i++) {
-        const angle = (Math.PI * 2 * i) / sampleCount;
-        const sx = nextX + Math.cos(angle) * coin.r;
-        const sy = nextY + Math.sin(angle) * coin.r;
-        if (isBlackPixel(renData, sx, sy)) {
-          // 円→外向きベクトル（だいたい法線方向）
-          const nx = Math.cos(angle);
-          const ny = Math.sin(angle);
+      for (let i=0;i<sampleCount;i++){
+        const ang = Math.PI*2*i/sampleCount;
+        const sx = nextX + Math.cos(ang)*coin.r;
+        const sy = nextY + Math.sin(ang)*coin.r;
+        if (isBlackPixel(renData,sx,sy)){
+          const nx = Math.cos(ang);
+          const ny = Math.sin(ang);
           nxSum += nx;
           nySum += ny;
-          count++;
+          hitCount++;
         }
       }
 
-      if (count > 0) {
+      if (hitCount>0){
         // 平均法線
-        let nx = nxSum / count;
-        let ny = nySum / count;
-        const nLen = Math.sqrt(nx * nx + ny * ny) || 1;
-        nx /= nLen;
-        ny /= nLen;
+        let nx = nxSum/hitCount;
+        let ny = nySum/hitCount;
+        const nLen = Math.sqrt(nx*nx+ny*ny) || 1;
+        nx/=nLen; ny/=nLen;
 
-        // 速度ベクトルを法線＆接線に分解
-        const vDotN = coin.vx * nx + coin.vy * ny;        // 法線成分
-        const vnX = vDotN * nx;
-        const vnY = vDotN * ny;
-        const vtX = coin.vx - vnX;                         // 接線成分
+        // 速度を法線・接線分解
+        const vDotN = coin.vx*nx + coin.vy*ny;
+        const vnX = vDotN*nx;
+        const vnY = vDotN*ny;
+        const vtX = coin.vx - vnX;
         const vtY = coin.vy - vnY;
 
-        // 法線成分はつぶして（or 少しだけバウンド）、接線成分だけ残し「斜面に沿って転がる」
-        coin.vx = vtX + (-vnX * bounce * 0.2); // ほんの少しだけ跳ね返り
-        coin.vy = vtY + (-vnY * bounce * 0.2);
+        // 壁の中にめり込まないよう、法線成分をつぶして接線方向だけ残す＋ほんの少しバウンド
+        coin.vx = vtX - vnX*bounce*0.3;
+        coin.vy = vtY - vnY*bounce*0.3;
 
-        // 法線方向に少しだけ押し戻して、めり込み防止
         nextX = coin.x + coin.vx;
         nextY = coin.y + coin.vy;
       }
@@ -678,125 +694,134 @@
     coin.x = nextX;
     coin.y = nextY;
 
-    // 枠との衝突
-    if (coin.x - coin.r < 0) {
-      coin.x = coin.r;
-      coin.vx *= -bounce;
-    }
-    if (coin.x + coin.r > canvas.width) {
-      coin.x = canvas.width - coin.r;
-      coin.vx *= -bounce;
-    }
-    if (coin.y - coin.r < 0) {
-      coin.y = coin.r;
-      coin.vy *= -bounce;
-    }
-    if (coin.y + coin.r > canvas.height) {
-      coin.y = canvas.height - coin.r;
-      coin.vy *= -bounce;
-    }
+    // 枠
+    if (coin.x-coin.r<0){ coin.x = coin.r; coin.vx*=-bounce; }
+    if (coin.x+coin.r>canvas.width){ coin.x = canvas.width-coin.r; coin.vx*=-bounce; }
+    if (coin.y-coin.r<0){ coin.y = coin.r; coin.vy*=-bounce; }
+    if (coin.y+coin.r>canvas.height){ coin.y = canvas.height-coin.r; coin.vy*=-bounce; }
 
     // 失敗穴
-    if (anaData) {
-      if (isBlackPixel(anaData, coin.x, coin.y)) {
-        coin.failed = true;
-        coin.inPlay = false;
-        infoMsgEl.textContent = '失敗…。また挑戦してね。';
-      }
+    if (anaData && isBlackPixel(anaData,coin.x,coin.y)){
+      coin.inPlay=false;
+      coin.failed=true;
+      infoMsgEl.textContent='失敗…。また挑戦してね。';
     }
     // 成功穴
-    if (atariData && !coin.failed && !coin.cleared) {
-      if (isBlackPixel(atariData, coin.x, coin.y)) {
-        coin.cleared = true;
-        coin.inPlay = false;
-        infoMsgEl.textContent = 'SUCCESS！おめでとう！';
-      }
+    if (atariData && !coin.failed && !coin.cleared && isBlackPixel(atariData,coin.x,coin.y)){
+      coin.inPlay=false;
+      coin.cleared=true;
+      infoMsgEl.textContent='SUCCESS！おめでとう！';
     }
+
+    // 回転：速度に比例・上限あり（高速で回転しすぎないように）
+    const speed = Math.sqrt(coin.vx*coin.vx + coin.vy*coin.vy);
+    const maxSpin = 0.25; // rad/frame 上限
+    const spin = Math.min(maxSpin, speed*0.03);
+    coin.angle += spin;
   }
 
   // ==========================
-  // レバー6本（reba1画像＋スライダー）
+  // レバー UI（reba1 の近くに配置）
   // ==========================
-  const leftLeversEl = document.getElementById('leftLevers');
-  const rightLeversEl = document.getElementById('rightLevers');
   const leverStates = [];
 
-  function createLever(index, side) {
-    const col = side === 'left' ? leftLeversEl : rightLeversEl;
+  function setupLeversUI() {
+    leverOverlay.innerHTML = '';
+    leverStates.length = 0;
 
-    const item = document.createElement('div');
-    item.className = 'lever-item';
+    const w = canvas.width;
+    const h = canvas.height;
 
-    const visual = document.createElement('div');
-    visual.className = 'lever-visual-img';
+    // 左右3本ずつの位置（ここは map/reba1 に合わせて後で微調整してOK）
+    const leverPositions = [
+      // 左側（x: 少し外寄り、y: 上中下）
+      { index: 0, side: 'left',  x: w*0.1, y: h*0.2 },
+      { index: 1, side: 'left',  x: w*0.1, y: h*0.5 },
+      { index: 2, side: 'left',  x: w*0.1, y: h*0.8 },
+      // 右側
+      { index: 3, side: 'right', x: w*0.9, y: h*0.2 },
+      { index: 4, side: 'right', x: w*0.9, y: h*0.5 },
+      { index: 5, side: 'right', x: w*0.9, y: h*0.8 },
+    ];
 
-    // reba1.png を背景的に表示（縮小）
-    if (images.reba1) {
-      visual.style.backgroundImage = `url(${images.reba1.src})`;
-      visual.style.backgroundSize = 'cover';
-      visual.style.backgroundPosition = 'center';
-    }
+    leverPositions.forEach(lp => {
+      const ui = document.createElement('div');
+      ui.className = 'lever-ui';
+      ui.style.left = `${lp.x - 18}px`; // 画像中心合わせ（36px/2）
+      ui.style.top  = `${lp.y - 18}px`;
 
-    const stick = document.createElement('div');
-    stick.className = 'lever-stick';
-    visual.appendChild(stick);
-
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.min = '0';
-    slider.max = '100';
-    slider.step = '1';
-    slider.value = '0';
-    slider.className = 'lever-slider';
-
-    const label = document.createElement('div');
-    label.className = 'lever-label';
-    label.textContent = side === 'left' ? `L${index+1}` : `R${index-2}`;
-
-    item.appendChild(visual);
-    item.appendChild(slider);
-    item.appendChild(label);
-    col.appendChild(item);
-
-    const lever = { index, side, slider, stick, value: 0 };
-    leverStates.push(lever);
-
-    let prevValue = 0;
-
-    slider.addEventListener('input', () => {
-      if (calcState() !== 'C') {
-        slider.value = '0';
-        return;
-      }
-      const v = Number(slider.value);
-      lever.value = v;
-
-      const angle = -90 * (v / 100); // 0→-90度 時計回り
-      stick.style.transform = `translate(-50%, 0) rotate(${angle}deg)`;
-
-      // 引き→離した瞬間を検知
-      if (prevValue > 20 && v < 5) {
-        const power = prevValue / 100;
-        fireLever(lever, power);
+      // レバー画像
+      const imgBox = document.createElement('div');
+      imgBox.className = 'lever-image';
+      if (images.reba1) {
+        imgBox.style.backgroundImage = `url(${images.reba1.src})`;
+        imgBox.style.backgroundSize = 'cover';
+        imgBox.style.backgroundPosition = 'center';
       }
 
-      prevValue = v;
-      touchAction();
+      const stick = document.createElement('div');
+      stick.className = 'lever-stick';
+      imgBox.appendChild(stick);
+
+      // スライダー（横に出す）
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = '0';
+      slider.max = '100';
+      slider.step = '1';
+      slider.value = '0';
+      slider.className = 'lever-slider';
+
+      const label = document.createElement('span');
+      label.className = 'lever-label';
+      label.textContent = lp.side === 'left' ? `L${lp.index+1}` : `R${lp.index-2}`;
+
+      // 左レバーは右側にスライダー、右レバーは左側にスライダー
+      if (lp.side === 'left') {
+        ui.appendChild(imgBox);
+        ui.appendChild(slider);
+        ui.appendChild(label);
+      } else {
+        ui.appendChild(label);
+        ui.appendChild(slider);
+        ui.appendChild(imgBox);
+      }
+
+      leverOverlay.appendChild(ui);
+
+      const lever = { ...lp, slider, stick, value: 0 };
+      leverStates.push(lever);
+
+      let prev = 0;
+
+      slider.addEventListener('input', () => {
+        if (calcState() !== 'C') {
+          slider.value = '0';
+          return;
+        }
+
+        // 「重く感じる」＝ 値が高くなるほど入力を鈍くする：ここでは感覚的な演出は難しいので、
+        // 代わりに「高い値は一気に動きづらい」ようにクリッピングする手もあるが、
+        // まずはシンプルに値→角度＆パワーとして扱う。
+
+        const v = Number(slider.value);
+        lever.value = v;
+
+        const angle = -90 * (v/100);
+        lever.stick.style.transform = `translate(-50%, 0) rotate(${angle}deg)`;
+
+        // 引いてから離す（v が急に小さくなった）のを検知
+        if (prev > 20 && v < 5) {
+          const power = prev / 100;
+          fireLever(lever, power);
+        }
+
+        prev = v;
+        touchAction();
+      });
     });
   }
 
-  function setupLevers() {
-    // 左3（index 0,1,2）
-    for (let i = 0; i < 3; i++) {
-      createLever(i, 'left');
-    }
-    // 右3（index 3,4,5）
-    for (let i = 3; i < 6; i++) {
-      createLever(i, 'right');
-    }
-  }
-
-  // レバーエリアは「左右×3列」に簡易分割
   function fireLever(lever, power) {
     if (!coin.inPlay || coin.cleared || coin.failed) return;
 
@@ -805,33 +830,34 @@
 
     const colWidth = w / 3;
     const rowHeight = h / 3;
+    const side = lever.side;
 
-    let colIndex = (lever.side === 'left') ? 0 : 2;
-    let rowIndex = (lever.side === 'left') ? lever.index : lever.index - 3;
+    // index 0,1,2 (left) / 3,4,5 (right)
+    const rowIndex = side === 'left' ? lever.index : lever.index - 3;
+    const colIndex = side === 'left' ? 0 : 2;
 
-    const colXMin = colIndex * colWidth;
+    const colXMin = colWidth * colIndex;
     const colXMax = colXMin + colWidth;
-    const rowYMin = rowIndex * rowHeight;
+    const rowYMin = rowHeight * rowIndex;
     const rowYMax = rowYMin + rowHeight;
 
     const inArea =
       coin.x >= colXMin && coin.x <= colXMax &&
       coin.y >= rowYMin && coin.y <= rowYMax;
 
-    if (!inArea) {
-      // 空振り
-      return;
-    }
+    if (!inArea) return; // 空振り
 
-    const dirX = (lever.side === 'left') ? 1 : -1;
-    const baseSpeed = 8; // 打ち出しの基礎速度（調整可）
+    // 打ち出す方向：レバー→盤面の内側（左右反対）
+    const dirX = (side === 'left') ? 1 : -1;
+    const baseSpeed = 12;          // 前回より約1.5倍強め
     const speed = baseSpeed * power;
 
     coin.vx += dirX * speed;
-    coin.vy -= speed * 0.5; // 少し上にも飛ばす
+    coin.vy -= speed * 0.5;
 
-    infoMsgEl.textContent = `${lever.side === 'left' ? '左' : '右'}レバーから発射！`;
+    infoMsgEl.textContent = `${side === 'left' ? '左' : '右'}レバーから発射！`;
 
+    // バネのように元の位置へ
     lever.slider.value = '0';
     lever.value = 0;
     lever.stick.style.transform = 'translate(-50%, 0) rotate(0deg)';
@@ -842,29 +868,27 @@
   // ==========================
   function drawGame() {
     if (images.map) {
-      ctx.drawImage(images.map, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(images.map,0,0,canvas.width,canvas.height);
     } else {
-      ctx.fillStyle = '#222';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle='#222';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
     }
 
     if (coin.inPlay || coin.cleared || coin.failed) {
       ctx.save();
-      ctx.translate(coin.x, coin.y);
-      const speed = Math.sqrt(coin.vx*coin.vx + coin.vy*coin.vy);
-      const rot = performance.now() * 0.004 * speed;
-      ctx.rotate(rot);
+      ctx.translate(coin.x,coin.y);
+      ctx.rotate(coin.angle);
 
-      const g = ctx.createRadialGradient(0,0,coin.r*0.2,0,0,coin.r);
-      g.addColorStop(0, '#ffe8a0');
-      g.addColorStop(1, '#c08a2a');
-      ctx.fillStyle = g;
+      const grad = ctx.createRadialGradient(0,0,coin.r*0.2,0,0,coin.r);
+      grad.addColorStop(0,'#ffe8a0');
+      grad.addColorStop(1,'#c08a2a');
+      ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(0,0,coin.r,0,Math.PI*2);
       ctx.fill();
 
       ctx.fillStyle = '#5b3a10';
-      ctx.font = 'bold 9px system-ui';
+      ctx.font = 'bold 8px system-ui';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('10',0,0);
@@ -873,7 +897,7 @@
     }
   }
 
-  function gameLoop() {
+  function gameLoop(){
     requestAnimationFrame(gameLoop);
     updatePhysics();
     drawGame();
@@ -885,25 +909,25 @@
   const jankenDummyBtn = document.getElementById('jankenDummyBtn');
   const jankenResult = document.getElementById('jankenResult');
   jankenDummyBtn.addEventListener('click', () => {
-    const hands = ['グー', 'チョキ', 'パー'];
-    const myHand = hands[Math.floor(Math.random() * 3)];
-    const cpuHand = hands[Math.floor(Math.random() * 3)];
-    let result;
-    if (myHand === cpuHand) result = 'あいこ';
-    else if (
-      (myHand === 'グー' && cpuHand === 'チョキ') ||
-      (myHand === 'チョキ' && cpuHand === 'パー') ||
-      (myHand === 'パー' && cpuHand === 'グー')
-    ) result = 'あなたの勝ち';
-    else result = 'あなたの負け';
-    jankenResult.textContent = `あなた：${myHand} / CPU：${cpuHand} → ${result}`;
+    const hands = ['グー','チョキ','パー'];
+    const my = hands[Math.floor(Math.random()*3)];
+    const cpu = hands[Math.floor(Math.random()*3)];
+    let res;
+    if (my===cpu) res='あいこ';
+    else if(
+      (my==='グー' && cpu==='チョキ') ||
+      (my==='チョキ' && cpu==='パー') ||
+      (my==='パー' && cpu==='グー')
+    ) res='あなたの勝ち';
+    else res='あなたの負け';
+    jankenResult.textContent = `あなた：${my} / CPU：${cpu} → ${res}`;
   });
 
   // ==========================
   // 初期化
   // ==========================
   loadAssets().then(() => {
-    spawnCoinAtStart();
+    spawnCoinAtSafeStart();
     gameLoop();
   });
 
