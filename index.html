@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>10円 vs ren由来の坂（282x521縦長）</title>
+  <title>10円 vs ren由来の坂（画像サイズ優先 + 線分交差CCD）</title>
   <style>
     body {
       margin: 0;
@@ -32,15 +32,14 @@
 </head>
 <body>
   <div id="info">
-    ・キャンバスサイズは 282x521（10円ゲーム本番と同じ縦長）。<br>
-    ・map.png / ren.png をこのサイズにフィットさせて描画。<br>
-    ・ren の黒線をスキャンして「横方向の連続黒」を坂として抽出。<br>
-    ・その坂に沿って 10円 が自然に転がるようにしつつ、貫通しにくいようにサブステップ＋押し出し強化。
+    ・map.png / ren.png の実サイズにキャンバスを合わせます（画像サイズ優先）。<br>
+    ・ren.png から水平線を簡易抽出して「板（線分）」として扱います。<br>
+    ・10円の移動は「前位置→次位置の線分」と「板線分」の交差判定で行い、高速でも貫通しません。<br>
+    ・10円の打ち出し・重力・坂上での転がりも含めたテスト向け。
   </div>
 
   <div id="canvasWrapper">
-    <!-- ★ キャンバスサイズを 282 x 521 に固定 -->
-    <canvas id="gameCanvas" width="282" height="521"></canvas>
+    <canvas id="gameCanvas"></canvas>
   </div>
 
   <div id="controlPanel">
@@ -60,18 +59,21 @@
     const resetCoinBtn = document.getElementById("resetCoinBtn");
     const playPauseBtn = document.getElementById("playPauseBtn");
 
-    // === ローカル or 同じオリジンに置いた画像を使うことを前提にしています ===
-    // 例: 同じフォルダに map.png / ren.png を保存しておき、下のパスを "map.png", "ren.png" にする
+    // ローカルに置いた画像ファイル
     const MAP_URL = "map.png";
     const REN_URL = "ren.png";
 
-    // 背景 map
-    const bgImage = new Image();
-    bgImage.src = MAP_URL;
-
-    // ren.png （解析用）
+    const bgImage  = new Image();
     const renImage = new Image();
+    let imagesLoaded = 0;
+
+    bgImage.src  = MAP_URL;
     renImage.src = REN_URL;
+
+    bgImage.onload  = onImageLoaded;
+    renImage.onload = onImageLoaded;
+
+    // ren解析用キャンバス
     const renCanvas = document.createElement("canvas");
     const renCtx    = renCanvas.getContext("2d");
     let renData = null;
@@ -92,15 +94,50 @@
     });
 
     const coin = {
-      x: canvas.width/2,
-      y: 50,
+      x: 0,
+      y: 0,
       vx: 0,
       vy: 0,
       r: 12
     };
 
-    // 複数坂
+    // ren由来の板（坂）線分
     const slopes = [];
+
+    let paused = false;
+    playPauseBtn.addEventListener("click", () => {
+      paused = !paused;
+      playPauseBtn.textContent = paused ? "再生" : "一時停止";
+    });
+
+    resetCoinBtn.addEventListener("click", () => {
+      resetCoinOnFirstSlope();
+    });
+
+    function onImageLoaded() {
+      imagesLoaded++;
+      if (imagesLoaded === 2) {
+        initAfterImagesLoaded();
+      }
+    }
+
+    function initAfterImagesLoaded() {
+      // 画像サイズ優先：map.png の実サイズにキャンバスを合わせる
+      const w = bgImage.naturalWidth  || bgImage.width;
+      const h = bgImage.naturalHeight || bgImage.height;
+      canvas.width  = w;
+      canvas.height = h;
+
+      // renCanvas も同じサイズで生成
+      renCanvas.width  = w;
+      renCanvas.height = h;
+      renCtx.drawImage(renImage, 0, 0, w, h);
+      renData = renCtx.getImageData(0, 0, w, h);
+
+      extractSlopesFromRen();
+      resetCoinOnFirstSlope();
+      loop();
+    }
 
     // 黒判定
     function isBlackAt(x, y) {
@@ -112,52 +149,22 @@
       return a > 20 && r < 40 && g < 40 && b < 40;
     }
 
-    // 画像ロード完了を待つ
-    let imagesLoaded = 0;
-    bgImage.onload = onImageLoaded;
-    renImage.onload = onImageLoaded;
-
-    function onImageLoaded() {
-      imagesLoaded++;
-      if (imagesLoaded === 2) {
-        initRenDataAndSlopes();
-      }
-    }
-
-    function initRenDataAndSlopes() {
-      // renCanvas も 282x521 に合わせる
-      renCanvas.width  = canvas.width;
-      renCanvas.height = canvas.height;
-      // ren をキャンバスサイズにフィットさせて描画
-      renCtx.drawImage(renImage, 0, 0, renCanvas.width, renCanvas.height);
-      renData = renCtx.getImageData(0, 0, renCanvas.width, renCanvas.height);
-
-      extractSlopesFromRen();
-      resetCoinOnFirstSlope();
-    }
-
+    // ren から「横方向の連続黒」を線分として抽出（ラフ版）
     function extractSlopesFromRen() {
       slopes.length = 0;
-      if (!renData) return;
-
       const w = renData.width;
       const h = renData.height;
 
-      // 超簡易：「横方向の連続した黒」を1本の線分とみなす
       for (let y = 0; y < h; y += 2) {
         let x = 0;
         while (x < w) {
-          // 黒区間の始まりを探す
           while (x < w && !isBlackAt(x, y)) x++;
           if (x >= w) break;
           const startX = x;
-          // 黒が途切れるまで進む
-          while (x < w && isBlackAt(x, y)) {
-            x++;
-          }
+          while (x < w && isBlackAt(x, y)) x++;
           const endX = x - 1;
           const length = endX - startX;
-          if (length > 8) { // 短すぎる線は無視
+          if (length > 8) {
             slopes.push({
               x1: startX,
               y1: y,
@@ -167,7 +174,6 @@
           }
         }
       }
-
       console.log("抽出された坂の本数:", slopes.length);
     }
 
@@ -177,8 +183,8 @@
         coin.y = 50;
       } else {
         const s = slopes[0];
-        const mx = (s.x1 + s.x2)/2;
-        const my = (s.y1 + s.y2)/2;
+        const mx = (s.x1 + s.x2) / 2;
+        const my = (s.y1 + s.y2) / 2;
         const dx = s.x2 - s.x1;
         const dy = s.y2 - s.y1;
         const len = Math.sqrt(dx*dx + dy*dy) || 1;
@@ -191,126 +197,138 @@
       coin.vy = 0;
     }
 
-    resetCoinBtn.addEventListener("click", resetCoinOnFirstSlope);
+    // 線分交差判定（p1→p2 と p3→p4 が交差するか & 交点）
+    function segmentIntersection(p1, p2, p3, p4) {
+      const x1 = p1.x, y1 = p1.y;
+      const x2 = p2.x, y2 = p2.y;
+      const x3 = p3.x, y3 = p3.y;
+      const x4 = p4.x, y4 = p4.y;
 
-    let paused = false;
-    playPauseBtn.addEventListener("click", () => {
-      paused = !paused;
-      playPauseBtn.textContent = paused ? "再生" : "一時停止";
-    });
+      const denom = (x1-x2)*(y3-y4) - (y1-y2)*(x3-x4);
+      if (Math.abs(denom) < 1e-8) return null; // 平行 or 同一直線
 
-    // 点 C と線分 AB の最近点
-    function closestPointOnSegment(ax, ay, bx, by, cx, cy) {
-      const abx = bx - ax;
-      const aby = by - ay;
-      const acx = cx - ax;
-      const acy = cy - ay;
-      const abLen2 = abx*abx + aby*aby || 1;
-      let t = (acx * abx + acy * aby) / abLen2;
-      t = Math.max(0, Math.min(1, t));
-      const px = ax + abx * t;
-      const py = ay + aby * t;
-      const dx = cx - px;
-      const dy = cy - py;
-      const d = Math.sqrt(dx*dx + dy*dy);
-      return { px, py, d, t };
+      const t = ((x1-x3)*(y3-y4) - (y1-y3)*(x3-x4)) / denom;
+      const u = -((x1-x2)*(y1-y3) - (y1-y2)*(x1-x3)) / denom;
+
+      // 0 <= t <= 1 かつ 0 <= u <= 1 なら線分同士が交差
+      if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+
+      const ix = x1 + t*(x2-x1);
+      const iy = y1 + t*(y2-y1);
+      return { x: ix, y: iy, t };
     }
 
-    // サブステップ + 押し出し強化版
     function updatePhysics() {
       if (paused) return;
       if (!renData) return;
 
-      const SUB_STEPS = 3; // サブステップ数（多いほど貫通しにくい）
-      const dt = 1 / SUB_STEPS;
+      // 1. 前フレーム位置を保持
+      const prev = { x: coin.x, y: coin.y };
 
-      for (let step = 0; step < SUB_STEPS; step++) {
-        // 1. 重力
-        coin.vy += GRAVITY * dt;
+      // 2. 重力を適用して「候補の次位置」を計算
+      coin.vy += GRAVITY;
+      const next = {
+        x: coin.x + coin.vx,
+        y: coin.y + coin.vy
+      };
 
-        // 2. 自由移動
-        coin.x += coin.vx * dt;
-        coin.y += coin.vy * dt;
+      // 3. prev→next の移動線分と各板線分の交差を調べる
+      let earliestHit = null;
 
-        // 3. 各坂と衝突＆坂上の運動（押し出しは最大3回まで）
-        for (const s of slopes) {
-          for (let iter = 0; iter < 3; iter++) { // 押し出し反復
-            const { px, py, d } = closestPointOnSegment(
-              s.x1, s.y1, s.x2, s.y2,
-              coin.x, coin.y
-            );
-            if (d >= coin.r) break; // もう食い込んでいない
+      for (const s of slopes) {
+        const p1 = prev;
+        const p2 = next;
+        // 板線分の中心線（円の中心との交差をまず調べる）
+        const p3 = { x: s.x1, y: s.y1 };
+        const p4 = { x: s.x2, y: s.y2 };
+        const hit = segmentIntersection(p1, p2, p3, p4);
+        if (!hit) continue;
 
-            const dx = s.x2 - s.x1;
-            const dy = s.y2 - s.y1;
-            const len = Math.sqrt(dx*dx + dy*dy) || 1;
-            const tx = dx / len; // 接線
-            const ty = dy / len;
-            const nx = -ty;      // 法線
-            const ny =  tx;
+        // 円の半径ぶんだけオフセットすべきだが、
+        // まずはセンター線との交差時点を「衝突時刻」とする（簡易CCD）
+        if (!earliestHit || hit.t < earliestHit.t) {
+          earliestHit = { hit, slope: s };
+        }
+      }
 
-            // 円を外側へ押し出す（MTD）
-            const penetration = coin.r - d + 0.2; // +0.2 で少し余裕を持たせる
-            coin.x += nx * penetration;
-            coin.y += ny * penetration;
+      if (!earliestHit) {
+        // 交差なし → 通常移動
+        coin.x = next.x;
+        coin.y = next.y;
+      } else {
+        const { hit, slope } = earliestHit;
+        // 4. 衝突した瞬間に位置を固定
+        coin.x = hit.x;
+        coin.y = hit.y;
 
-            // 速度分解
-            const vpx = coin.vx;
-            const vpy = coin.vy;
-            const v_parallel = vpx * tx + vpy * ty;
-            let v_normal   = vpx * nx + vpy * ny;
+        // 5. 板に沿う/垂直の速度成分を計算
+        const dx = slope.x2 - slope.x1;
+        const dy = slope.y2 - slope.y1;
+        const len = Math.sqrt(dx*dx + dy*dy) || 1;
+        const tx = dx / len; // 接線
+        const ty = dy / len;
+        const nx = -ty;      // 法線
+        const ny =  tx;
 
-            // 法線速度は 0 に近づける
-            v_normal = 0;
+        const vpx = coin.vx;
+        const vpy = coin.vy;
+        const v_parallel = vpx * tx + vpy * ty;
+        let v_normal   = vpx * nx + vpy * ny;
 
-            // 坂に沿った重力加速度
-            const g_parallel = GRAVITY * ty * dt; // dt をかける
-            let new_v_parallel = v_parallel + g_parallel;
+        // 法線速度は完全に殺す or 少し反射させる
+        // ここでは「軽いバウンド」にする場合：
+        const BOUNCE = 0.0;  // 0 なら完全に殺す、0.3ならちょっと跳ねる
+        v_normal = -v_normal * BOUNCE;
 
-            // 静止摩擦：加速度と速度が閾値以下なら止める
-            if (Math.abs(g_parallel) < STATIC_THRESHOLD * dt &&
-                Math.abs(v_parallel) < STATIC_THRESHOLD) {
-              new_v_parallel = 0;
-            } else {
-              // 動摩擦：減衰
-              new_v_parallel *= (1 - SLOPE_FRICTION);
-            }
+        // 坂に沿った重力加速度（このフレーム分）
+        const g_parallel = GRAVITY * ty;
+        let new_v_parallel = v_parallel + g_parallel;
 
-            // 合成
-            coin.vx = new_v_parallel * tx + v_normal * nx;
-            coin.vy = new_v_parallel * ty + v_normal * ny;
-          }
+        // 静止摩擦
+        if (Math.abs(g_parallel) < STATIC_THRESHOLD &&
+            Math.abs(v_parallel) < STATIC_THRESHOLD) {
+          new_v_parallel = 0;
+        } else {
+          // 動摩擦
+          new_v_parallel *= (1 - SLOPE_FRICTION);
         }
 
-        // 4. 枠バウンド
-        const bounce = 0.3;
-        if (coin.x - coin.r < 0) {
-          coin.x = coin.r;
-          if (coin.vx < 0) coin.vx *= -bounce;
-        }
-        if (coin.x + coin.r > canvas.width) {
-          coin.x = canvas.width - coin.r;
-          if (coin.vx > 0) coin.vx *= -bounce;
-        }
-        if (coin.y - coin.r < 0) {
-          coin.y = coin.r;
-          if (coin.vy < 0) coin.vy *= -bounce;
-        }
-        if (coin.y + coin.r > canvas.height) {
-          coin.y = canvas.height - coin.r;
-          if (coin.vy > 0) coin.vy *= -bounce;
-        }
+        // 合成して速度を更新
+        coin.vx = new_v_parallel * tx + v_normal * nx;
+        coin.vy = new_v_parallel * ty + v_normal * ny;
+
+        // 6. このフレームではここで終了（この後さらに位置を進めない）
+        //  → 再貫通を防ぐ
+      }
+
+      // 7. 画面枠処理（簡易）
+      const bounce = 0.3;
+      if (coin.x - coin.r < 0) {
+        coin.x = coin.r;
+        if (coin.vx < 0) coin.vx *= -bounce;
+      }
+      if (coin.x + coin.r > canvas.width) {
+        coin.x = canvas.width - coin.r;
+        if (coin.vx > 0) coin.vx *= -bounce;
+      }
+      if (coin.y - coin.r < 0) {
+        coin.y = coin.r;
+        if (coin.vy < 0) coin.vy *= -bounce;
+      }
+      if (coin.y + coin.r > canvas.height) {
+        coin.y = canvas.height - coin.r;
+        if (coin.vy > 0) coin.vy *= -bounce;
       }
     }
 
     function draw() {
       if (!bgImage.complete) return;
 
+      // 背景：画像サイズそのまま
       ctx.clearRect(0,0,canvas.width,canvas.height);
-      // 背景：282x521 にフィットさせて描画
       ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
 
-      // ren由来の坂
+      // ren由来の板
       ctx.strokeStyle = "#44aaff";
       ctx.lineWidth = 2;
       for (const s of slopes) {
@@ -337,12 +355,10 @@
 
     function loop() {
       requestAnimationFrame(loop);
-      if (!renData) return; // 画像読み込み待ち
+      if (!renData) return;
       updatePhysics();
       draw();
     }
-
-    loop();
   </script>
 </body>
 </html>
