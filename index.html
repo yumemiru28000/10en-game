@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>10円ゲーム 統合版（運営専用UI＋ドラッグ移動＋テストレール）</title>
+  <title>10円ゲーム ハイブリッド版（v13 + Matter.js）</title>
   <style>
     body {
       margin: 0;
@@ -15,8 +15,9 @@
       overflow: hidden;
     }
 
+    /* 左側：UI パネル（将来 Firebase や名前入力もここに統合可能） */
     #uiPanel {
-      width: 240px;
+      width: 260px;
       background: #111;
       border-right: 1px solid #333;
       padding: 8px;
@@ -39,7 +40,7 @@
       background-position: center center;
     }
 
-    /* レバー UI */
+    /* レバー UI （1本テスト用） */
     #leverArea {
       position: relative;
       width: 180px;
@@ -96,35 +97,26 @@
       background: #444;
     }
     input[type="number"],
-    input[type="password"] {
-      width: 80px;
+    input[type="password"],
+    input[type="text"] {
+      width: 90px;
       background: #222;
       border: 1px solid #555;
       color: #eee;
       padding: 2px 4px;
       border-radius: 3px;
       margin: 1px 0;
+      font-size: 11px;
     }
 
-    #adminPanel {
-      font-size: 12px;
-    }
-    #adminPanel .admin-only {
-      display: none;
-    }
-    #adminPanel.enabled .admin-only {
-      display: block;
-    }
-
-    #adminStatus {
+    .label-small {
       font-size: 11px;
       color: #ccc;
-      margin-bottom: 4px;
     }
 
-    #stickInfo {
+    #angleText, #powerText {
       font-size: 11px;
-      color: #aaa;
+      color: #ccc;
     }
 
     input[type="range"] {
@@ -136,85 +128,87 @@
       color: #ccc;
     }
 
-    .label-small {
-      font-size: 11px;
-      color: #ccc;
-    }
-
-    /* 表示だけ少しズーム（物理サイズ 282x521 はそのまま） */
-    #world canvas {
-      width: 110%;
+    /* 右側キャンバスのズーム（表示だけ拡大） */
+    #gameCanvas {
+      width: 110%;      /* ズーム倍率 */
       height: auto;
       transform: translateX(-5%);
+      background: #000;
+    }
+
+    /* 上部にプレイヤー名や状態を表示するバー（v13 っぽく） */
+    #statusBar {
+      font-size: 11px;
+      padding: 4px;
+      border: 1px solid #444;
+      border-radius: 4px;
+      background: #181818;
     }
   </style>
 </head>
 <body>
+  <!-- 左：UI パネル -->
   <div id="uiPanel">
-    <!-- ここだけは誰でも見える（パスワード入力） -->
-    <div id="adminPanel">
-      <div><strong>運営ログイン</strong></div>
-      <div id="adminStatus">未ログイン（マップだけ表示）</div>
-      パスワード:
-      <input id="adminPass" type="password" placeholder="1122">
-      <button id="adminLogin">ログイン</button>
+    <!-- v13っぽいプレイヤー情報（今はローカルのみ） -->
+    <div id="statusBar">
+      <div>PLAYING：<span id="playingName">Player</span></div>
+      <div>状態：<span id="stateLabel">ローカル練習モード</span></div>
+    </div>
 
-      <!-- ここから下は運営だけ -->
-      <div class="admin-only" style="margin-top:8px;">
-        <!-- レバー UI -->
-        <div id="leverArea">
-          <div id="lever"></div>
-          <div id="leverLabel">レバー</div>
-        </div>
-        <div>
-          角度: <span id="angleText">0</span>�� /
-          引き具合: <span id="powerText">0.00</span>
-        </div>
+    <div style="margin-top:8px;">
+      <span class="label-small">プレイヤー名</span><br>
+      <input id="playerNameInput" type="text" placeholder="未入力なら『Player』">
+      <button id="decideNameBtn">決定</button>
+    </div>
 
-        <!-- 基本操作 -->
-        <div style="margin-top:6px;">
-          <span class="label-small">全体設定</span><br>
-          重力:
-          <input id="gravity" type="number" step="0.1" value="1.0"><br>
-          <button id="spawnCoin">10円 生成</button>
-          <button id="resetCoins">10円 全リセット</button>
-        </div>
+    <!-- レバー UI -->
+    <div style="margin-top:8px;">
+      <div class="label-small">レバー（1本テスト）</div>
+      <div id="leverArea">
+        <div id="lever"></div>
+        <div id="leverLabel">レバー</div>
+      </div>
+      <div>
+        角度: <span id="angleText">0</span>° /
+        引き具合: <span id="powerText">0.00</span>
+      </div>
+      <div style="margin-top:4px;">
+        <span class="label-small">レバー設定</span><br>
+        打ち出し方向(度):
+        <input id="leverAngleDegInput" type="number" step="5" value="-45"><br>
+        打ち出し最大速度:
+        <input id="leverPowerMaxInput" type="number" step="5" value="30">
+      </div>
+    </div>
 
-        <!-- レバーの方向・強さ -->
-        <div style="margin-top:6px;">
-          <span class="label-small">レバー設定</span><br>
-          打ち出し方向(度):
-          <input id="leverAngleDegInput" type="number" step="5" value="-45"><br>
-          打ち出し最大速度:
-          <input id="leverPowerMaxInput" type="number" step="5" value="30">
-        </div>
+    <!-- 重力やスポーン設定（運営用テスト） -->
+    <div style="margin-top:8px;">
+      <span class="label-small">世界設定（テスト用）</span><br>
+      重力:
+      <input id="gravity" type="number" step="0.1" value="1.0"><br>
+      <button id="spawnCoin">10円 追加</button>
+      <button id="resetCoins">10円 全リセット</button><br>
+      <button id="resetSpawnToCenter">スポーンを中央付近に戻す</button>
+      <div style="font-size:11px;color:#aaa;">
+        マップ上の緑の丸が「10円スポーン位置」です（ドラッグで移動可）。
+      </div>
+    </div>
 
-        <!-- スポーン位置（ドラッグで移動） -->
-        <div style="margin-top:6px;">
-          <span class="label-small">10円スポーン位置（ドラッグで移動）</span><br>
-          <button id="resetSpawnToCenter">スポーンを中央付近に戻す</button>
-          <div style="font-size:11px;color:#aaa;">
-            マップ上の「緑の丸」をドラッグして動かせます。
-          </div>
-        </div>
-
-        <!-- 棒編集 -->
-        <div style="margin-top:6px;">
-          <span class="label-small">棒編集（ドラッグで斜面実験用）</span><br>
-          <button id="toggleStickEdit">棒編集モード: OFF</button><br>
-          棒の太さ:
-          <input id="stickThickness" type="range" min="5" max="50" value="20">
-          <span id="stickThicknessLabel" class="range-label-inline">20</span> px<br>
-          <button id="resetSticks">棒 全リセット</button>
-          <div id="stickInfo">
-            棒編集モード中: キャンバス上を2回クリック<br>
-            → その2点を結ぶ棒が作られます。
-          </div>
-        </div>
+    <!-- 棒（壁・斜面）の編集実験 -->
+    <div style="margin-top:8px;">
+      <span class="label-small">棒編集（斜面テスト用）</span><br>
+      <button id="toggleStickEdit">棒編集モード: OFF</button><br>
+      棒の太さ:
+      <input id="stickThickness" type="range" min="5" max="50" value="20">
+      <span id="stickThicknessLabel" class="range-label-inline">20</span> px<br>
+      <button id="resetSticks">棒 全リセット</button>
+      <div style="font-size:11px;color:#aaa;">
+        棒編集モード中にキャンバス上で2点クリックすると、その2点を結ぶ棒が作られます。
       </div>
     </div>
   </div>
 
+  <!-- 右：ゲーム世界（map + Matter.js） -->
   <div id="world"></div>
 
   <!-- Matter.js -->
@@ -225,24 +219,24 @@
     // ============================================================
     const MAP_IMAGE_URL = "https://raw.githubusercontent.com/yumemiru28000/10en-game/main/map.png";
 
-    // レバー物理
-    const REBA_HEAVINESS_EXPONENT = 3.0;
+    // レバー物理係数
+    const REBA_HEAVINESS_EXPONENT = 3.0; // 引くほど重く → パワーは3乗で増える
     const REBA_MAX_ANGLE_DEG      = 90;
     const REBA_DRAG_SENSITIVITY   = 0.5;
 
-    // 10円玉
-    const COIN_RADIUS = 11;
-    const COIN_MASS   = 0.0055;
-    const COIN_RESTITUTION    = 0.3;
-    const COIN_FRICTION       = 0.05;
-    const COIN_FRICTION_STATIC= 0.1;
-    const COIN_FRICTION_AIR   = 0.001;
+    // 10円玉パラメータ（物理換算）
+    const COIN_RADIUS = 11;        // ピクセル半径（表示と判定用）
+    const COIN_MASS   = 0.0055;    // 10円4.5g を px世界にスケールしたイメージ
+    const COIN_RESTITUTION    = 0.3;   // 反発係数
+    const COIN_FRICTION       = 0.05;  // 床との摩擦
+    const COIN_FRICTION_STATIC= 0.1;   // 静止摩擦
+    const COIN_FRICTION_AIR   = 0.001; // 空気抵抗
 
     // 斜面方向に転がる補助力
     const SLOPE_EXTRA_FORCE_SCALE = 0.002;
 
     // ============================================================
-    // Matter.js セットアップ
+    // Matter.js 初期化（物理基盤）
     // ============================================================
     const {
       Engine, Render, Runner, Bodies, Body, Composite,
@@ -251,14 +245,9 @@
 
     const engine = Engine.create();
     const world  = engine.world;
+    engine.world.gravity.y = 1.0; // 10円の重さをイメージした重力倍率
 
-    // ★ 解決反復回数を少し増やして安定させる
-    engine.positionIterations = 8;  // デフォルト6 → 8
-    engine.velocityIterations = 6;  // デフォルト4 → 6
-
-    engine.world.gravity.y = 1.0;
-
-    const canvasWidth  = window.innerWidth - 240;
+    const canvasWidth  = window.innerWidth - 260; // 左UIぶん引く
     const canvasHeight = window.innerHeight;
 
     const render = Render.create({
@@ -268,33 +257,33 @@
         width: canvasWidth,
         height: canvasHeight,
         wireframes: false,
-        background: "#000",
+        background: "#000"
       }
     });
     Render.run(render);
     const runner = Runner.create();
     Runner.run(runner, engine);
 
-    // マップ画像だけ最初から表示
+    // map.png を背景にセット（見た目と物理は別レイヤ）
     render.canvas.style.backgroundImage = `url("${MAP_IMAGE_URL}")`;
     render.canvas.style.backgroundSize = "contain";
     render.canvas.style.backgroundRepeat = "no-repeat";
     render.canvas.style.backgroundPosition = "center center";
 
     // ============================================================
-    // UI 要素
+    // UI 要素参照
     // ============================================================
-    const adminPanelEl = document.getElementById("adminPanel");
-    const adminStatusEl = document.getElementById("adminStatus");
-    const adminPassEl   = document.getElementById("adminPass");
-    const adminLoginBtn = document.getElementById("adminLogin");
+    const playingNameEl  = document.getElementById("playingName");
+    const stateLabelEl   = document.getElementById("stateLabel");
+    const nameInput      = document.getElementById("playerNameInput");
+    const decideNameBtn  = document.getElementById("decideNameBtn");
 
-    const leverEl = document.getElementById("lever");
-    const angleTextEl = document.getElementById("angleText");
-    const powerTextEl = document.getElementById("powerText");
-    const gravityInput = document.getElementById("gravity");
-    const spawnCoinBtn = document.getElementById("spawnCoin");
-    const resetCoinsBtn = document.getElementById("resetCoins");
+    const leverEl        = document.getElementById("lever");
+    const angleTextEl    = document.getElementById("angleText");
+    const powerTextEl    = document.getElementById("powerText");
+    const gravityInput   = document.getElementById("gravity");
+    const spawnCoinBtn   = document.getElementById("spawnCoin");
+    const resetCoinsBtn  = document.getElementById("resetCoins");
     const leverAngleDegInput = document.getElementById("leverAngleDegInput");
     const leverPowerMaxInput = document.getElementById("leverPowerMaxInput");
     const resetSpawnToCenterBtn = document.getElementById("resetSpawnToCenter");
@@ -303,56 +292,47 @@
     const stickThicknessInput= document.getElementById("stickThickness");
     const stickThicknessLabel= document.getElementById("stickThicknessLabel");
 
-    let isAdmin = false;
+    let myName = localStorage.getItem("10yen_name") || "Player";
+    playingNameEl.textContent = myName;
 
-    function setAdminMode(on) {
-      isAdmin = on;
-      if (on) {
-        adminPanelEl.classList.add("enabled");
-        adminStatusEl.textContent = "ログイン中（運営モード）";
-        // オブジェクトを初期化（後で作成）
-        initWorldObjectsOnce();
-      } else {
-        adminPanelEl.classList.remove("enabled");
-        adminStatusEl.textContent = "未ログイン（マップだけ表示）";
-      }
-    }
-
-    adminLoginBtn.addEventListener("click", () => {
-      if (adminPassEl.value === "1122") {
-        setAdminMode(true);
-      } else {
-        adminStatusEl.textContent = "パスワード不正";
-      }
+    decideNameBtn.addEventListener("click", () => {
+      const v = nameInput.value.trim();
+      myName = v || "Player";
+      playingNameEl.textContent = myName;
+      localStorage.setItem("10yen_name", myName);
+      stateLabelEl.textContent = "ローカル練習モード";
     });
 
     // ============================================================
-    // 物理オブジェクト（運営ログイン後にだけ生成）
+    // 物理オブジェクト
     // ============================================================
     let worldInitialized = false;
     let leftWall, rightWall, ceiling, slopedFloor, cornerPost, gentleSlope;
-    let centerRail;   // ★ 中央テストレール
     const stickBodies = [];
     const coins = [];
 
-    // スポーン位置（1つだけ）
+    // スポーン位置（あとで緑のハンドルで動かせる）
     let spawnPos = { x: canvasWidth * 0.3, y: canvasHeight * 0.4 };
-
-    // スポーン位置を表示するための「緑の丸」（ドラッグで動かせる）
     let spawnHandleBody = null;
     const SPAWN_HANDLE_RADIUS = 14;
 
-    // レバー設定（方向とパワー）
-    let leverAngleDegSetting = -45;
-    let leverPowerMax        = 30;
+    // レバー設定
+    let leverAngleDegSetting = parseFloat(leverAngleDegInput.value) || -45;
+    let leverPowerMax        = parseFloat(leverPowerMaxInput.value) || 30;
+    leverAngleDegInput.addEventListener("input", () => {
+      leverAngleDegSetting = parseFloat(leverAngleDegInput.value) || leverAngleDegSetting;
+    });
+    leverPowerMaxInput.addEventListener("input", () => {
+      leverPowerMax = parseFloat(leverPowerMaxInput.value) || leverPowerMax;
+    });
 
-    // レバーの実角度
+    // レバーUIの状態
     let leverAngleDeg = 0;
     let isDraggingLever = false;
     let dragStartY = 0;
     let dragStartAngle = 0;
 
-    // マウス（棒編集＋スポーンハンドルドラッグ用）
+    // マウス（棒編集＆スポーン用）
     const mouse = Mouse.create(render.canvas);
     const mouseConstraint = MouseConstraint.create(engine, {
       mouse,
@@ -370,11 +350,14 @@
       stickThicknessLabel.textContent = currentStickThickness;
     });
 
+    // 初期化（最初の物理世界構築）
+    initWorldObjectsOnce();
+
     function initWorldObjectsOnce() {
       if (worldInitialized) return;
       worldInitialized = true;
 
-      // --- 周囲の壁 ---
+      // 画面左右と上の壁
       const thickness = 40;
       leftWall = Bodies.rectangle(20, canvasHeight/2, thickness, canvasHeight, {
         isStatic: true,
@@ -389,7 +372,7 @@
         render: { fillStyle: "rgba(80,80,80,0.6)" }
       });
 
-      // --- 右下斜面と角 ---
+      // テスト用: 右下の大きな斜面
       const bigFloorAngle = -Math.PI/8;
       const bigFloorLength = 500;
       slopedFloor = Bodies.rectangle(
@@ -403,6 +386,8 @@
           render: { fillStyle: "rgba(120,120,120,0.7)" }
         }
       );
+
+      // 右下角の柱
       cornerPost = Bodies.rectangle(
         canvasWidth - 350,
         canvasHeight - 150,
@@ -414,36 +399,22 @@
         }
       );
 
-      // --- ゆるい斜面 ---
+      // 画面中央の緩やかな斜面（水平テスト用）
       gentleSlope = Bodies.rectangle(
         canvasWidth/2,
-        canvasHeight/2 + 80,
+        canvasHeight/2,
         350,
         10,
         {
           isStatic: true,
-          angle: 0.04,
+          angle: 0.02, // わずかに右下��り
           render: { fillStyle: "rgba(100,100,100,0.7)" }
         }
       );
 
-      // --- ★ 中央テストレール ---
-      // 画面中央あたりに、水平な棒を1本追加
-      centerRail = Bodies.rectangle(
-        canvasWidth / 2,         // 中央X
-        canvasHeight / 2,        // 中央Y
-        220,                     // 長さ
-        8,                       // 太さ
-        {
-          isStatic: true,
-          angle: 0,
-          render: { fillStyle: "rgba(200,200,200,0.9)" }
-        }
-      );
+      Composite.add(world, [leftWall, rightWall, ceiling, slopedFloor, cornerPost, gentleSlope]);
 
-      Composite.add(world, [leftWall, rightWall, ceiling, slopedFloor, cornerPost, gentleSlope, centerRail]);
-
-      // --- スポーンハンドル（緑の丸） ---
+      // スポーン位置を示す緑の丸
       spawnHandleBody = Bodies.circle(spawnPos.x, spawnPos.y, SPAWN_HANDLE_RADIUS, {
         isStatic: false,
         isSensor: true,
@@ -459,8 +430,15 @@
       // 最初の10円1枚
       addCoinAt(spawnPos.x, spawnPos.y);
 
-      cacheStaticBodies();
+      // 棒編集やスポーンハンドル用マウスイベント
       setupMouseEvents();
+
+      // 斜面補助力用に静的ボディをキャッシュ
+      cacheStaticBodies();
+      Events.on(engine, "beforeUpdate", () => {
+        // 斜面補助力（ゆるく転がしたい時に使う / 重すぎるとおかしくなるので微調整前提）
+        applySlopeForces();
+      });
     }
 
     function createCoin(x, y) {
@@ -492,11 +470,11 @@
     }
 
     // ============================================================
-    // レバーの UI と打ち出し
+    // レバー物理（1本テスト版）
     // ============================================================
     function calcPullPower() {
-      const normalized = leverAngleDeg / REBA_MAX_ANGLE_DEG;
-      return Math.pow(normalized, REBA_HEAVINESS_EXPONENT);
+      const normalized = leverAngleDeg / REBA_MAX_ANGLE_DEG; // 0〜1
+      return Math.pow(normalized, REBA_HEAVINESS_EXPONENT);  // 重くなるほどパワー↑
     }
 
     function updateLeverVisual() {
@@ -516,7 +494,7 @@
       const rad = leverAngleDegSetting * Math.PI / 180;
       const dir = { x: Math.cos(rad), y: Math.sin(rad) };
 
-      // スポーン位置の近くにある10円を打ち出す
+      // スポーン位置の近くにある10円だけを打ち出す
       const radius = 40;
       coins.forEach(c => {
         const dx = c.position.x - spawnPos.x;
@@ -531,7 +509,6 @@
     }
 
     function startDragLever(startY) {
-      if (!isAdmin) return;
       isDraggingLever = true;
       dragStartY = startY;
       dragStartAngle = leverAngleDeg;
@@ -585,21 +562,11 @@
 
     updateLeverVisual();
 
-    // レバー設定 UI
-    leverAngleDegSetting = parseFloat(leverAngleDegInput.value) || -45;
-    leverPowerMax        = parseFloat(leverPowerMaxInput.value) || 30;
-
-    leverAngleDegInput.addEventListener("input", () => {
-      leverAngleDegSetting = parseFloat(leverAngleDegInput.value) || leverAngleDegSetting;
-    });
-    leverPowerMaxInput.addEventListener("input", () => {
-      leverPowerMax = parseFloat(leverPowerMaxInput.value) || leverPowerMax;
-    });
-
     // ============================================================
-    // スポーン位置のドラッグ
+    // スポーン位置と棒編集
     // ============================================================
     function setupMouseEvents() {
+      // spawnHandleBody は MouseConstraint によってドラッグできる
       Events.on(mouseConstraint, "enddrag", event => {
         const body = event.body;
         if (body === spawnHandleBody) {
@@ -608,9 +575,9 @@
         }
       });
 
-      // 棒編集のクリック（キャンバス上）
+      // 棒編集（斜面作成）用クリック
       render.canvas.addEventListener("mousedown", e => {
-        if (!isAdmin || !stickEditMode) return;
+        if (!stickEditMode) return;
         const rect = render.canvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
@@ -641,15 +608,13 @@
       });
     }
 
-    // 棒編集 UI
     toggleStickEditBtn.addEventListener("click", () => {
-      if (!isAdmin) return;
       stickEditMode = !stickEditMode;
       toggleStickEditBtn.textContent = "棒編集モード: " + (stickEditMode ? "ON" : "OFF");
       if (!stickEditMode) pendingPoint = null;
     });
+
     resetSticksBtn.addEventListener("click", () => {
-      if (!isAdmin) return;
       for (const b of stickBodies) Composite.remove(world, b);
       stickBodies.length = 0;
       pendingPoint = null;
@@ -657,7 +622,7 @@
     });
 
     // ============================================================
-    // 斜面方向に転がる補助力
+    // 斜面方向に転がる補助力（任意）
     // ============================================================
     let staticBodiesCache = null;
     function cacheStaticBodies() {
@@ -708,13 +673,8 @@
       }
     }
 
-    Events.on(engine, "beforeUpdate", () => {
-      if (!isAdmin) return;
-      applySlopeForces();
-    });
-
     // ============================================================
-    // その他 UI ボタン
+    // UI ボタンと重力
     // ============================================================
     gravityInput?.addEventListener("input", e => {
       const g = parseFloat(e.target.value) || 0;
@@ -722,60 +682,24 @@
     });
 
     spawnCoinBtn?.addEventListener("click", () => {
-      if (!isAdmin) return;
       addCoinAt(spawnPos.x, spawnPos.y);
     });
 
     resetCoinsBtn?.addEventListener("click", () => {
-      if (!isAdmin) return;
       resetCoins();
     });
 
     resetSpawnToCenterBtn?.addEventListener("click", () => {
-      if (!isAdmin || !spawnHandleBody) return;
+      if (!spawnHandleBody) return;
       spawnPos.x = canvasWidth * 0.3;
       spawnPos.y = canvasHeight * 0.4;
       Body.setPosition(spawnHandleBody, spawnPos);
     });
 
     // ============================================================
-    // 描画ループ
+    // じゃんけん（仮）用：ここではスキップ or 必要なら実装
     // ============================================================
-    function drawGame() {
-      // Matter.Render に任せているので、ここで別描画はしていない
-    }
 
-    function gameLoop() {
-      requestAnimationFrame(gameLoop);
-      drawGame();
-    }
-
-    // ============================================================
-    // じゃんけん（仮）
-    // ============================================================
-    const jankenDummyBtn=document.getElementById('jankenDummyBtn');
-    const jankenResult=document.getElementById('jankenResult');
-    jankenDummyBtn.addEventListener('click',()=>{
-      const hands=['グー','チョキ','パー'];
-      const my=hands[Math.floor(Math.random()*3)];
-      const cpu=hands[Math.floor(Math.random()*3)];
-      let res;
-      if(my===cpu) res='あいこ';
-      else if(
-        (my==='グー'&&cpu==='チョキ')||
-        (my==='チョキ'&&cpu==='パー')||
-        (my==='パー'&&cpu==='グー')
-      ) res='あなたの勝ち'; else res='あなたの負け';
-      jankenResult.textContent=`あなた：${my} / CPU：${cpu} → ${res}`;
-    });
-
-    // ============================================================
-    // 初期化
-    // ============================================================
-    loadAssets().then(()=>{
-      spawnCoinAtSafeStart();
-      gameLoop();
-    });
   </script>
 </body>
 </html>
