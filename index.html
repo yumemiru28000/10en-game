@@ -2,247 +2,71 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>10円ゲーム発射機構シミュレーション</title>
+  <title>10円玉 発射レバー 実験</title>
   <style>
     body {
       margin: 0;
-      background: #111;
+      background: #222;
       color: #eee;
-      font-family: system-ui, sans-serif;
+      font-family: sans-serif;
       display: flex;
       flex-direction: column;
       height: 100vh;
     }
-    #top-bar {
-      padding: 6px 10px;
-      background: #000;
-      font-size: 13px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
     #world {
       flex: 1;
-      display: flex;
-      background: #111;
     }
-    #canvas-container {
-      flex: 1;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
-    #side-panel {
-      width: 260px;
-      border-left: 1px solid #333;
+    #ui {
       padding: 8px;
-      box-sizing: border-box;
-      font-size: 12px;
-      background: #151515;
-    }
-    h2 {
-      margin: 6px 0;
-      font-size: 14px;
-      border-bottom: 1px solid #444;
-      padding-bottom: 2px;
-    }
-    .section {
-      margin-bottom: 8px;
-    }
-    .label {
-      font-weight: bold;
-      font-size: 12px;
-    }
-    #log {
-      height: 160px;
-      background: #050505;
-      border: 1px solid #333;
-      padding: 4px;
-      overflow-y: auto;
-      font-family: monospace;
-      font-size: 11px;
-      white-space: pre-line;
-    }
-    button, select {
-      font-size: 12px;
-      padding: 2px 6px;
-      background: #222;
-      color: #eee;
-      border: 1px solid #555;
-      border-radius: 3px;
-      cursor: pointer;
-    }
-    button:hover {
-      background: #333;
-    }
-    input[type="number"] {
       background: #111;
-      border: 1px solid #444;
-      color: #eee;
-      width: 60px;
-      padding: 2px 3px;
-      font-size: 12px;
+      font-size: 14px;
     }
-    .state-led {
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      margin-right: 4px;
-      background: #400;
-      border: 1px solid #800;
-    }
-    .state-led.on {
-      background: #0f0;
-      border-color: #8f8;
-    }
-    #lever-area {
-      position: relative;
-      width: 80px;
-      height: 200px;
-      margin-top: 8px;
-      background: #050505;
-      border: 1px solid #444;
-      border-radius: 6px;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      user-select: none;
-    }
-    #lever-slot {
-      position: absolute;
-      width: 10px;
-      height: 120px;
-      background: #222;
-      border-radius: 5px;
-    }
-    #lever-handle {
-      position: absolute;
-      width: 26px;
-      height: 26px;
-      border-radius: 50%;
-      background: #666;
-      border: 2px solid #aaa;
-      cursor: grab;
-      left: 50%;
-      transform: translateX(-50%);
-    }
-    #lever-label-top, #lever-label-bottom {
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 11px;
-      color: #888;
-    }
-    #lever-label-top { top: 8px; }
-    #lever-label-bottom { bottom: 8px; }
-
-    .tiny {
-      font-size: 11px;
-      color: #aaa;
+    button {
+      margin-right: 8px;
     }
   </style>
 </head>
 <body>
-  <div id="top-bar">
-    <span>10円ゲーム 発射機構シミュレーション（レバー → スイッチ → 基板 → ソレノイド → アーム → コイン）</span>
-  </div>
-
-  <div id="world">
-    <div id="canvas-container">
-      <!-- Matter.jsレンダリングがここに入る -->
-    </div>
-    <div id="side-panel">
-      <h2>レバー操作</h2>
-      <div class="section">
-        <div id="lever-area">
-          <div id="lever-slot"></div>
-          <div id="lever-handle"></div>
-          <div id="lever-label-top">OFF</div>
-          <div id="lever-label-bottom">ON</div>
-        </div>
-        <div class="tiny">マウスで丸いレバーを下にドラッグ → 一定以上で「スイッチON」</div>
-      </div>
-
-      <h2>状態表示</h2>
-      <div class="section">
-        <div>
-          <span class="state-led" id="led-coin"></span>
-          <span class="label">コイン検出</span>
-          <span class="tiny" id="text-coin">(なし)</span>
-        </div>
-        <div>
-          <span class="state-led" id="led-lever"></span>
-          <span class="label">レバーON</span>
-        </div>
-        <div>
-          <span class="state-led" id="led-board"></span>
-          <span class="label">制御基板</span>
-          <span class="tiny" id="text-board">(待機中)</span>
-        </div>
-        <div>
-          <span class="state-led" id="led-solenoid"></span>
-          <span class="label">ソレノイド駆動</span>
-        </div>
-      </div>
-
-      <h2>設定・実験操作</h2>
-      <div class="section">
-        <div>
-          発射方式:
-          <select id="drive-mode">
-            <option value="solenoid">ソレノイド式</option>
-            <option value="motor">モーター＋アーム式（見た目のみ）</option>
-          </select>
-        </div>
-        <div style="margin-top:4px;">
-          重力: <input id="gravity" type="number" step="0.2" value="1.2"> <span class="tiny">(下向き)</span>
-        </div>
-        <div style="margin-top:4px;">
-          コインをセット: <button id="load-coin">1枚装填</button>
-        </div>
-        <div style="margin-top:4px;">
-          リセット: <button id="reset">全消去</button>
-        </div>
-      </div>
-
-      <h2>内部の流れログ</h2>
-      <div id="log"></div>
-    </div>
+  <div id="world"></div>
+  <div id="ui">
+    マウスでレバー（白い棒）をドラッグして「引き」、離すと 10円が発射されます。
+    <button id="reset">リセット</button>
   </div>
 
   <!-- Matter.js -->
   <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
   <script>
-    // --- 物理エンジン初期化 ---
     const {
       Engine,
       Render,
       Runner,
       Bodies,
       Composite,
-      Body,
       Constraint,
-      Events,
-      Vector
+      Body,
+      Mouse,
+      MouseConstraint,
+      Vector,
+      Events
     } = Matter;
 
     const engine = Engine.create();
-    const world = engine.world;
-    engine.world.gravity.y = 1.2;
+    const world  = engine.world;
 
-    const WIDTH = 500;
-    const HEIGHT = 500;
+    // 重力（下向き）
+    engine.world.gravity.y = 1;
+
+    const width  = 800;
+    const height = 400;
 
     const render = Render.create({
-      element: document.getElementById('canvas-container'),
+      element: document.getElementById('world'),
       engine,
       options: {
-        width: WIDTH,
-        height: HEIGHT,
-        background: '#111',
+        width,
+        height,
         wireframes: false,
-        pixelRatio: window.devicePixelRatio
+        background: '#222'
       }
     });
 
@@ -250,299 +74,186 @@
     const runner = Runner.create();
     Runner.run(runner, engine);
 
-    // --- 静的な台・レール・背景オブジェクト ---
-    // 地面
-    const floor = Bodies.rectangle(WIDTH/2, HEIGHT - 10, WIDTH, 20, {
+    // 床と壁
+    const floor = Bodies.rectangle(width/2, height-20, width, 40, {
+      isStatic: true,
+      render: { fillStyle: '#444' }
+    });
+
+    const leftWall = Bodies.rectangle(40, height/2, 40, height, {
+      isStatic: true,
+      render: { fillStyle: '#333' }
+    });
+    const rightWall = Bodies.rectangle(width-40, height/2, 40, height, {
       isStatic: true,
       render: { fillStyle: '#333' }
     });
 
-    // コイン発射レール（やや傾斜）
-    const rail = Bodies.rectangle(170, 220, 140, 8, {
-      isStatic: true,
-      angle: -Math.PI/24, // 少し右上がり
-      render: { fillStyle: '#444' }
-    });
+    Composite.add(world, [floor, leftWall, rightWall]);
 
-    // コイン発射口のストッパー（前方の邪魔物なしイメージ用に小さめ）
-    const coinStop = Bodies.rectangle(230, 200, 10, 40, {
-      isStatic: true,
-      render: { fillStyle: '#555' }
-    });
+    // 10円玉パラメータ
+    const COIN_RADIUS = 11;      // 見た目の大きさ
+    const COIN_MASS   = 0.0055;  // 5.5g
 
-    // 壁（実験スペースの箱）
-    const leftWall  = Bodies.rectangle(60, HEIGHT/2, 20, HEIGHT, { isStatic: true, render:{ fillStyle:'#222'} });
-    const rightWall = Bodies.rectangle(WIDTH-20, HEIGHT/2, 20, HEIGHT, { isStatic: true, render:{ fillStyle:'#222'} });
+    // 発射位置（レバー先端の前あたり）
+    const LAUNCH_X = 250;
+    const LAUNCH_Y = height - 80;
 
-    Composite.add(world, [floor, rail, coinStop, leftWall, rightWall]);
-
-    // --- ソレノイド（電磁石）＋アームのモデル ---
-    // 固定台座
-    const base = Bodies.rectangle(120, 220, 30, 30, {
-      isStatic: true,
-      render: { fillStyle: '#444' }
-    });
-
-    // アーム（コインを叩く棒）
-    const armLength = 70;
-    const arm = Bodies.rectangle(140, 210, armLength, 8, {
-      density: 0.004,
-      friction: 0.2,
-      frictionAir: 0.02,
-      render: { fillStyle: '#cc8844' }
-    });
-
-    // ヒンジ（回転軸）
-    const hinge = Constraint.create({
-      pointA: { x: 120, y: 210 },
-      bodyB: arm,
-      pointB: { x: -armLength/2 + 5, y: 0 },
-      stiffness: 1,
-      length: 0
-    });
-
-    // アームの初期角度（やや後ろに引いた位置）
-    Body.setAngle(arm, 0);
-
-    Composite.add(world, [base, arm, hinge]);
-
-    // コイン（10円玉）パラメータ
-    const COIN_RADIUS = 11;       // 見た目ピクセル
-    const COIN_MASS   = 0.0055;   // 5.5g
-    const COIN_DENSITY = 0.0025;  // 見た目の慣性など用
-
-    let loadedCoin = null;        // レールにセットされているコイン
-    let coins = [];               // 飛んだコインの配列
-
-    // 状態LED&テキストの取得
-    const ledCoin     = document.getElementById('led-coin');
-    const ledLever    = document.getElementById('led-lever');
-    const ledBoard    = document.getElementById('led-board');
-    const ledSolenoid = document.getElementById('led-solenoid');
-    const textCoin    = document.getElementById('text-coin');
-    const textBoard   = document.getElementById('text-board');
-    const logArea     = document.getElementById('log');
-
-    const gravityInput  = document.getElementById('gravity');
-    const loadCoinBtn   = document.getElementById('load-coin');
-    const resetBtn      = document.getElementById('reset');
-    const driveModeSel  = document.getElementById('drive-mode');
-
-    // ログ出力
-    function log(msg) {
-      const t = new Date().toLocaleTimeString('ja-JP', { hour12:false });
-      logArea.textContent += `[${t}] ${msg}\n`;
-      logArea.scrollTop = logArea.scrollHeight;
-    }
-
-    // LED制御
-    function setLed(el, on) {
-      if (on) el.classList.add('on');
-      else el.classList.remove('on');
-    }
-
-    // コインをレール上に1枚セット
-    function loadCoin() {
-      if (loadedCoin) {
-        log('既にコインがレール上にあります。');
-        return;
-      }
-      const coin = Bodies.circle(190, 205, COIN_RADIUS, {
+    function createCoin() {
+      const coin = Bodies.circle(LAUNCH_X, LAUNCH_Y, COIN_RADIUS, {
+        mass: COIN_MASS,
         restitution: 0.3,
         friction: 0.05,
         frictionAir: 0.001,
-        density: COIN_DENSITY,
-        mass: COIN_MASS,
         render: {
-          fillStyle: '#c88a37',
-          strokeStyle: '#e0c38f',
+          fillStyle: '#cc8844',
+          strokeStyle: '#ddbb77',
           lineWidth: 2
         }
       });
-      loadedCoin = coin;
-      coins.push(coin);
+      return coin;
+    }
+
+    let coin = createCoin();
+    Composite.add(world, coin);
+
+    // レバー（打ち出し棒）
+    // 支点は少し左下、棒は右方向に伸びる
+    const PIVOT_X = 200;
+    const PIVOT_Y = height - 60;
+    const LEVER_LENGTH = 150;
+
+    const lever = Bodies.rectangle(
+      PIVOT_X + LEVER_LENGTH/2,
+      PIVOT_Y,
+      LEVER_LENGTH,
+      18,
+      {
+        mass: 1,
+        friction: 0.02,
+        frictionAir: 0.002,
+        render: {
+          fillStyle: '#f0f0f0'
+        }
+      }
+    );
+
+    // 支点（固定）
+    const pivot = Bodies.circle(PIVOT_X, PIVOT_Y, 5, {
+      isStatic: true,
+      render: { fillStyle: '#ff4444' }
+    });
+
+    // レバーと支点を結ぶジョイント（回転ヒンジ）
+    const hinge = Constraint.create({
+      bodyA: lever,
+      pointA: { x: -LEVER_LENGTH/2, y: 0 },
+      bodyB: pivot,
+      pointB: { x: 0, y: 0 },
+      length: 0,
+      stiffness: 1
+    });
+
+    Composite.add(world, [lever, pivot, hinge]);
+
+    // 「発射台」っぽさを出すためのガイド（見た目だけ）
+    const guide = Bodies.rectangle(LAUNCH_X + 40, LAUNCH_Y + 5, 120, 10, {
+      isStatic: true,
+      angle: 0,
+      render: { fillStyle: '#666' }
+    });
+    Composite.add(world, guide);
+
+    // マウス制御
+    const mouse = Mouse.create(render.canvas);
+    const mouseConstraint = MouseConstraint.create(engine, {
+      mouse,
+      constraint: {
+        stiffness: 0.2,
+        render: { visible: false }
+      }
+    });
+    Composite.add(world, mouseConstraint);
+
+    render.mouse = mouse;
+
+    // レバーの「自然な角度」（0 ラジアンより少し上向きにしておく）
+    const REST_ANGLE = -0.2; // ラジアン（少し上向き）
+
+    // レバーにかかる「バネトルク」の強さ
+    const SPRING_STIFFNESS = 0.8; // 大きいほど強く戻る
+    const SPRING_DAMPING   = 0.2; // 減衰（揺れを止めるため）
+
+    // マウスでレバーをドラッグしているかどうか
+    let isDraggingLever = false;
+
+    // どのボディをつかんだか確認し、レバーならドラッグ中フラグを立てる
+    Events.on(mouseConstraint, 'startdrag', (event) => {
+      if (event.body === lever) {
+        isDraggingLever = true;
+        // ドラッグ中はレバーの角速度を0にしておく（手でゆっくり動かすイメージ）
+        Body.setAngularVelocity(lever, 0);
+      }
+    });
+
+    Events.on(mouseConstraint, 'enddrag', (event) => {
+      if (event.body === lever) {
+        // レバーから手を離した
+        isDraggingLever = false;
+        // ここからはバネの力で自動的に戻る
+      }
+    });
+
+    // 毎フレーム、レバーに「バネトルク」を加える
+    Events.on(engine, 'beforeUpdate', () => {
+      // レバーの現在角度
+      const angle = lever.angle;
+
+      // 目標角度との差（REST_ANGLE が自然な位置）
+      const angleError = angle - REST_ANGLE;
+
+      // 角速度（回転スピード）
+      const angVel = lever.angularVelocity;
+
+      // バネトルク = -k * 角度差
+      // 減衰トルク = -d * 角速度
+      const torque = -SPRING_STIFFNESS * angleError - SPRING_DAMPING * angVel;
+
+      // レバーをドラッグしている間も、バネのエネルギーは「ためて」おくイメージとして
+      // 常にトルクは計算しておく（ただし、ドラッグ中はマウス制約が強く支配する）
+      Body.applyForce(
+        lever,
+        lever.position,
+        // トルクを擬似的に力に変換（レバーの長さで割る）
+        {
+          x: 0,
+          y: torque / LEVER_LENGTH
+        }
+      );
+    });
+
+    // 10円が「レバー先端」に乗るように、定期的に位置を確認し、
+    // レバーが戻るときに自然に弾かれるようにする
+    // ここでは特別な制約は使わず、ただ置いておくだけ
+    function resetCoinAndLever() {
+      // 10円をリセット
+      if (coin) {
+        Composite.remove(world, coin);
+      }
+      coin = createCoin();
       Composite.add(world, coin);
-      setLed(ledCoin, true);
-      textCoin.textContent = '10円硬貨セット (半固定)';
-      log('コインをレール上にセット。');
+
+      // レバーの角度と位置を初期化
+      Body.setPosition(lever, { x: PIVOT_X + LEVER_LENGTH/2, y: PIVOT_Y });
+      Body.setAngle(lever, REST_ANGLE);
+      Body.setAngularVelocity(lever, 0);
+      Body.setVelocity(lever, { x: 0, y: 0 });
     }
 
-    loadCoinBtn.addEventListener('click', loadCoin);
+    document.getElementById('reset').addEventListener('click', resetCoinAndLever);
 
-    // --- レバー（UI側） ---
-    const leverArea   = document.getElementById('lever-area');
-    const leverHandle = document.getElementById('lever-handle');
-
-    const LEVER_TOP_Y    = 40;
-    const LEVER_BOTTOM_Y = 140;
-    const LEVER_ON_TH    = 115;  // この位置より下でスイッチON
-
-    let draggingLever = false;
-    let leverStateOn  = false;
-
-    function updateLeverLed() {
-      setLed(ledLever, leverStateOn);
-    }
-
-    function leverTo(y) {
-      // yは lever-area 内の相対座標
-      const clamped = Math.max(LEVER_TOP_Y, Math.min(LEVER_BOTTOM_Y, y));
-      leverHandle.style.top = clamped + 'px';
-      const prevOn = leverStateOn;
-      leverStateOn = (clamped >= LEVER_ON_TH);
-      if (leverStateOn !== prevOn) {
-        if (leverStateOn) {
-          log('レバーON（スイッチ押下）');
-          updateLeverLed();
-          onLeverSwitchedOn();
-        } else {
-          log('レバーOFF（スイッチ開放）');
-          updateLeverLed();
-        }
-      }
-    }
-
-    // 初期位置はOFF側
-    leverTo(LEVER_TOP_Y);
-
-    leverHandle.addEventListener('mousedown', (e) => {
-      draggingLever = true;
-      leverHandle.style.cursor = 'grabbing';
-      e.preventDefault();
-    });
-    document.addEventListener('mousemove', (e) => {
-      if (!draggingLever) return;
-      const rect = leverArea.getBoundingClientRect();
-      const localY = e.clientY - rect.top;
-      leverTo(localY);
-    });
-    document.addEventListener('mouseup', () => {
-      if (!draggingLever) return;
-      draggingLever = false;
-      leverHandle.style.cursor = 'grab';
-      // 手を離したらスプリングのようにOFF側に戻す
-      leverTo(LEVER_TOP_Y);
-    });
-
-    // --- 制御基板の状態 ---
-    let boardBusy = false;
-
-    function setBoardState(text, on) {
-      textBoard.textContent = text;
-      setLed(ledBoard, on);
-    }
-
-    // --- ソレノイド駆動シミュレーション ---
-    function driveSolenoidAndFire() {
-      if (!loadedCoin) {
-        log('ソレノイド要求 → しかしコインが無いので発射なし。');
-        return;
-      }
-      log('ソレノイドON → アームを一瞬だけ強く前方へ。');
-      setLed(ledSolenoid, true);
-
-      // アームに瞬間的なトルクを与える（右上方向に回転）
-      // （ベクトルをアーム中心からヒットポイント方向に加える）
-      const impulseMag = 0.12; // 力の強さ（調整用）
-
-      // アーム先端付近の座標を計算
-      const armPos = arm.position;
-      const armAngle = arm.angle;
-      const hitPoint = {
-        x: armPos.x + (armLength/2 - 5) * Math.cos(armAngle),
-        y: armPos.y + (armLength/2 - 5) * Math.sin(armAngle)
-      };
-
-      // コインの中心がヒットポイント付近にある想定
-      if (loadedCoin) {
-        const dir = Vector.normalise({
-          x: Math.cos(armAngle),
-          y: Math.sin(armAngle) - 0.1
-        });
-        const impulse = Vector.mult(dir, impulseMag);
-        Body.applyForce(arm, hitPoint, impulse);
-
-        // 同時にコインにも少し前向きの力を加える（アームの硬接触の簡略版）
-        Body.applyForce(loadedCoin, loadedCoin.position, Vector.mult(dir, impulseMag * 1.2));
-
-        // コインはもう���装填状態」ではないので検出LEDを消す
-        loadedCoin = null;
-        setLed(ledCoin, false);
-        textCoin.textContent = '(なし)';
-      }
-
-      // 少し時間が経ったらソレノイドOFF（LEDのみ）
-      setTimeout(() => {
-        setLed(ledSolenoid, false);
-      }, 120);
-    }
-
-    // レバーON時に呼ばれる（基板の仕事）
-    function onLeverSwitchedOn() {
-      if (boardBusy) {
-        log('基板は処理中のため、新しいレバー入力を無視。');
-        return;
-      }
-      boardBusy = true;
-      setBoardState('レバー入力確認中…', true);
-
-      // ① レバーON → 基板が入力受信
-      // ② コインがあるか確認
-      setTimeout(() => {
-        if (!loadedCoin) {
-          log('制御基板：コインがセットされていないため、発射中止。');
-          setBoardState('コインなし → 何もしない', false);
-          boardBusy = false;
-          return;
-        }
-        setBoardState('コインOK → 発射命令', true);
-        log('制御基板：コイン検出OK → ソレノイドに発射命令。');
-
-        // ドライブ方式で処理切り替え（現状は挙動ほぼ同じでメッセージのみ）
-        const mode = driveModeSel.value;
-        if (mode === 'solenoid') {
-          driveSolenoidAndFire();
-        } else {
-          log('モーター式：モーター回転 → ギア → アーム → コインを弾く（簡略モデルで同じ動き）。');
-          driveSolenoidAndFire();
-        }
-
-        // 0.1秒後に基板は待機へ戻る（「0.1秒以下」のイメージ）
-        setTimeout(() => {
-          setBoardState('待機中', false);
-          boardBusy = false;
-        }, 120);
-      }, 60);
-    }
-
-    // 重力調整
-    gravityInput.addEventListener('input', (e) => {
-      const g = parseFloat(e.target.value) || 0;
-      engine.world.gravity.y = g;
-      log(`重力を ${g} に変更。`);
-    });
-
-    // リセット
-    resetBtn.addEventListener('click', () => {
-      // コイン削除
-      coins.forEach(c => Composite.remove(world, c));
-      coins = [];
-      loadedCoin = null;
-      setLed(ledCoin, false);
-      textCoin.textContent = '(なし)';
-
-      // アームを初期角度・位置に戻す
-      Body.setPosition(arm, { x: 140, y: 210 });
-      Body.setAngle(arm, 0);
-      Body.setAngularVelocity(arm, 0);
-      Body.setVelocity(arm, { x: 0, y: 0 });
-
-      log('実験スペースをリセット。');
-    });
-
-    // 初期ログ
-    log('シミュレーション起動: レバーを下にドラッグして「レバーON → スイッチON」を再現。');
-    log('「1枚装填」でコインをレールにセット。コインなしでレバーONしても何も起きません。');
+    // 初期状態
+    resetCoinAndLever();
   </script>
 </body>
 </html>
