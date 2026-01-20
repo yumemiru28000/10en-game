@@ -18,9 +18,7 @@
       min-height: 100vh;
     }
 
-    h1, h2, h3 {
-      text-align: center;
-    }
+    h1, h2, h3 { text-align: center; }
 
     button {
       cursor: pointer;
@@ -34,13 +32,11 @@
       box-shadow: 0 3px 0 #7b6432;
       transition: transform 0.05s ease, box-shadow 0.05s ease, filter 0.1s;
     }
-
     button:active {
       transform: translateY(2px);
       box-shadow: 0 1px 0 #7b6432;
       filter: brightness(0.9);
     }
-
     button[disabled] {
       opacity: 0.5;
       cursor: not-allowed;
@@ -55,10 +51,7 @@
       padding: 16px;
       box-sizing: border-box;
     }
-
-    .screen.active {
-      display: block;
-    }
+    .screen.active { display: block; }
 
     .panel {
       background: #222;
@@ -79,9 +72,7 @@
       color: #eee;
     }
 
-    .center {
-      text-align: center;
-    }
+    .center { text-align: center; }
 
     .status-bar {
       display: flex;
@@ -90,10 +81,7 @@
       margin-bottom: 4px;
     }
 
-    .small {
-      font-size: 12px;
-      opacity: 0.8;
-    }
+    .small { font-size: 12px; opacity: 0.8; }
 
     #gameContainer {
       position: relative;
@@ -133,7 +121,7 @@
       margin-bottom: 8px;
     }
 
-    /* レバー：reba1 の位置の横にバーを置くためのコンテナ */
+    /* レバーUIをキャンバス上に重ねる */
     #leverOverlay {
       position: absolute;
       left: 0;
@@ -173,9 +161,7 @@
       transform: translate(-50%, 0) rotate(0deg);
     }
 
-    .lever-slider {
-      width: 70px;
-    }
+    .lever-slider { width: 70px; }
 
     .lever-label {
       font-size: 10px;
@@ -235,14 +221,19 @@
 
     <div class="msg" id="infoMsg"></div>
     <div class="small">
-      ・誰もいない時：今なら遊べます<br>
+      ・誰��いない時：今なら遊べます<br>
       ・PLAYING：○○が挑戦中（観戦のみ）<br>
       ・待機：次に遊びたい人：n人
+    </div>
+
+    <div class="small" style="margin-top:6px;">
+      ※ デバッグ中：<br>
+      map=そのまま / ren=赤 / ana=青 / atari=緑 / kaisi=黄 / reba=マゼンタ
     </div>
   </div>
 </div>
 
-<!-- 3. じゃんけんゲーム画面（仮） -->
+<!-- 3. じゃんけんゲーム（仮） -->
 <div id="screen-janken" class="screen">
   <div class="panel">
     <h2>じゃんけんゲーム（仮）</h2>
@@ -255,7 +246,9 @@
 </div>
 
 <script type="module">
-  // --- Firebase 初期化（省略せずそのまま） ---
+  // ==========================
+  // Firebase 初期化
+  // ==========================
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-app.js";
   import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-analytics.js";
   import {
@@ -283,7 +276,9 @@
   const analytics = getAnalytics(app);
   const db = getDatabase(app);
 
+  // ==========================
   // 画面切り替え
+  // ==========================
   const screens = {
     menu: document.getElementById('screen-menu'),
     name: document.getElementById('screen-name'),
@@ -298,7 +293,9 @@
   document.getElementById('toJankenBtn').addEventListener('click', () => showScreen('janken'));
   document.getElementById('backToMenuBtn').addEventListener('click', () => showScreen('menu'));
 
+  // ==========================
   // 名前管理
+  // ==========================
   const nameInput = document.getElementById('playerNameInput');
   const decideNameBtn = document.getElementById('decideNameBtn');
   let myName = localStorage.getItem('10yen_name') || '';
@@ -310,7 +307,9 @@
     showScreen('ten');
   });
 
+  // ==========================
   // Firebase 状態
+  // ==========================
   const playingNameEl = document.getElementById('playingName');
   const waitingNamesEl = document.getElementById('waitingNames');
   const stateLabelEl = document.getElementById('stateLabel');
@@ -427,7 +426,9 @@
     });
   });
 
-  // ===== PNG & 物理 =====
+  // ==========================
+  // PNG & 物理
+  // ==========================
   const canvas = document.getElementById('gameCanvas');
   const ctx = canvas.getContext('2d');
   const leverOverlay = document.getElementById('leverOverlay');
@@ -442,7 +443,7 @@
       if(!url){resolve();return;}
       const img=new Image();
       img.crossOrigin="anonymous";
-      img.onload=()=>{images[key]=img;resolve();};
+      img.onload=()=>{ images[key]=img; resolve(); };
       img.onerror=reject;
       img.src=url;
     });
@@ -551,6 +552,7 @@
     if(renData){
       const sampleCount=12;
       let hitCount=0, nxSum=0, nySum=0;
+
       for(let i=0;i<sampleCount;i++){
         const ang=Math.PI*2*i/sampleCount;
         const sx=nextX+Math.cos(ang)*coin.r;
@@ -561,27 +563,39 @@
           hitCount++;
         }
       }
+
       if(hitCount){
+        // 平均法線ベクトル（外側向き）
         let nx=nxSum/hitCount, ny=nySum/hitCount;
         const len=Math.sqrt(nx*nx+ny*ny)||1;
         nx/=len; ny/=len;
+
+        // 速度を法線・接線に分解
         const vDotN=coin.vx*nx+coin.vy*ny;
         const vnX=vDotN*nx, vnY=vDotN*ny;
         const vtX=coin.vx-vnX, vtY=coin.vy-vnY;
-        coin.vx = vtX - vnX*bounce*0.3;
-        coin.vy = vtY - vnY*bounce*0.3;
-        nextX=coin.x+coin.vx;
-        nextY=coin.y+coin.vy;
+
+        // 法線側は強めに殺し、接線だけ残す → 壁に食い込まず、斜面に沿って転がる
+        coin.vx = vtX - vnX*bounce*0.6;
+        coin.vy = vtY - vnY*bounce*0.6;
+
+        // ★ めり込み補正：法線方向に少し外へ押し戻す
+        const pushOut = 1.5; // ここを大きくすると、10円と壁の隙間が広がる
+        nextX = coin.x + coin.vx + nx * pushOut;
+        nextY = coin.y + coin.vy + ny * pushOut;
       }
     }
 
-    coin.x=nextX; coin.y=nextY;
+    coin.x = nextX;
+    coin.y = nextY;
 
+    // 枠
     if(coin.x-coin.r<0){ coin.x=coin.r; coin.vx*=-bounce; }
     if(coin.x+coin.r>canvas.width){ coin.x=canvas.width-coin.r; coin.vx*=-bounce; }
     if(coin.y-coin.r<0){ coin.y=coin.r; coin.vy*=-bounce; }
     if(coin.y+coin.r>canvas.height){ coin.y=canvas.height-coin.r; coin.vy*=-bounce; }
 
+    // 失敗／成功
     if(anaData && isBlackPixel(anaData,coin.x,coin.y)){
       coin.inPlay=false; coin.failed=true; infoMsgEl.textContent='失敗…。また挑戦してね。';
     }
@@ -589,26 +603,29 @@
       coin.inPlay=false; coin.cleared=true; infoMsgEl.textContent='SUCCESS！おめでとう！';
     }
 
+    // 回転速度に上限
     const speed=Math.sqrt(coin.vx*coin.vx+coin.vy*coin.vy);
     const maxSpin=0.25;
     const spin=Math.min(maxSpin,speed*0.03);
     coin.angle += spin;
   }
 
-  // レバー UI
+  // ==========================
+  // レバーUI（reba1 の近く）
+  // ==========================
   const leverStates=[];
   function setupLeversUI(){
     leverOverlay.innerHTML=''; leverStates.length=0;
-    const w=canvas.width,h=canvas.height;
-    const leverPos=[
-      { index:0, side:'left',  x:w*0.1,y:h*0.2 },
-      { index:1, side:'left',  x:w*0.1,y:h*0.5 },
-      { index:2, side:'left',  x:w*0.1,y:h*0.8 },
-      { index:3, side:'right', x:w*0.9,y:h*0.2 },
-      { index:4, side:'right', x:w*0.9,y:h*0.5 },
-      { index:5, side:'right', x:w*0.9,y:h*0.8 },
+    const w=canvas.width, h=canvas.height;
+    const pos=[
+      { index:0, side:'left',  x:w*0.1, y:h*0.2 },
+      { index:1, side:'left',  x:w*0.1, y:h*0.5 },
+      { index:2, side:'left',  x:w*0.1, y:h*0.8 },
+      { index:3, side:'right', x:w*0.9, y:h*0.2 },
+      { index:4, side:'right', x:w*0.9, y:h*0.5 },
+      { index:5, side:'right', x:w*0.9, y:h*0.8 },
     ];
-    leverPos.forEach(lp=>{
+    pos.forEach(lp=>{
       const ui=document.createElement('div');
       ui.className='lever-ui';
       ui.style.left=`${lp.x-18}px`;
@@ -666,14 +683,12 @@
     const colIndex=(lever.side==='left')?0:2;
     const colXMin=colW*colIndex,colXMax=colXMin+colW;
     const rowYMin=rowH*rowIndex,rowYMax=rowYMin+rowH;
-
     const inArea=(coin.x>=colXMin&&coin.x<=colXMax&&coin.y>=rowYMin&&coin.y<=rowYMax);
     if(!inArea) return;
 
     const dirX=(lever.side==='left')?1:-1;
     const baseSpeed=12;
     const speed=baseSpeed*power;
-
     coin.vx += dirX*speed;
     coin.vy -= speed*0.5;
     infoMsgEl.textContent = `${lever.side==='left'?'左':'右'}レバーから発射！`;
@@ -683,22 +698,62 @@
     lever.stick.style.transform='translate(-50%, 0) rotate(0deg)';
   }
 
-  // 描画（ここで ren を可視化）
+  // ==========================
+  // 描画（全PNGを色分け表示）
+  // ==========================
   function drawGame(){
-    // 背景
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // map（そのまま）
     if(images.map){
+      ctx.globalAlpha=1.0;
+      ctx.globalCompositeOperation='source-over';
       ctx.drawImage(images.map,0,0,canvas.width,canvas.height);
-    } else {
-      ctx.fillStyle='#222';
-      ctx.fillRect(0,0,canvas.width,canvas.height);
     }
 
-    // ★ デバッグ表示：ren（レーン判定）を半透明で重ねる
+    // ren（赤）
     if(images.ren){
       ctx.save();
-      ctx.globalAlpha = 0.4;        // 透明度
-      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha=0.3;
+      ctx.globalCompositeOperation='source-over';
       ctx.drawImage(images.ren,0,0,canvas.width,canvas.height);
+      ctx.restore();
+    }
+
+    // ana（青）
+    if(images.ana){
+      ctx.save();
+      ctx.globalAlpha=0.3;
+      ctx.globalCompositeOperation='lighten';
+      ctx.fillStyle='rgba(0,0,255,0.3)';
+      ctx.drawImage(images.ana,0,0,canvas.width,canvas.height);
+      ctx.restore();
+    }
+
+    // atari（緑）
+    if(images.atari){
+      ctx.save();
+      ctx.globalAlpha=0.4;
+      ctx.globalCompositeOperation='lighten';
+      ctx.drawImage(images.atari,0,0,canvas.width,canvas.height);
+      ctx.restore();
+    }
+
+    // kaisi（黄）
+    if(images.kaisi){
+      ctx.save();
+      ctx.globalAlpha=0.5;
+      ctx.globalCompositeOperation='lighten';
+      ctx.drawImage(images.kaisi,0,0,canvas.width,canvas.height);
+      ctx.restore();
+    }
+
+    // reba（マゼンタ）
+    if(images.reba){
+      ctx.save();
+      ctx.globalAlpha=0.4;
+      ctx.globalCompositeOperation='lighten';
+      ctx.drawImage(images.reba,0,0,canvas.width,canvas.height);
       ctx.restore();
     }
 
@@ -725,7 +780,9 @@
 
   function gameLoop(){ requestAnimationFrame(gameLoop); updatePhysics(); drawGame(); }
 
+  // ==========================
   // じゃんけん（仮）
+  // ==========================
   const jankenDummyBtn=document.getElementById('jankenDummyBtn');
   const jankenResult=document.getElementById('jankenResult');
   jankenDummyBtn.addEventListener('click',()=>{
@@ -735,14 +792,16 @@
     let res;
     if(my===cpu) res='あいこ';
     else if(
-      (my==='グー'&&cpu==='チョキ') ||
-      (my==='チョキ'&&cpu==='パー') ||
+      (my==='グー'&&cpu==='チョキ')||
+      (my==='チョキ'&&cpu==='パー')||
       (my==='パー'&&cpu==='グー')
     ) res='あなたの勝ち'; else res='あなたの負け';
     jankenResult.textContent=`あなた：${my} / CPU：${cpu} → ${res}`;
   });
 
+  // ==========================
   // 初期化
+  // ==========================
   loadAssets().then(()=>{
     spawnCoinAtSafeStart();
     gameLoop();
