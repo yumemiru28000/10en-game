@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <title>10円ゲーム：レバー式発射実験</title>
+  <meta charset="UTF-8">
+  <title>10円ゲーム 実験レバー付きシミュレーション</title>
   <style>
     body {
       margin: 0;
@@ -10,137 +10,136 @@
       color: #eee;
       font-family: sans-serif;
       display: flex;
+      flex-direction: column;
       height: 100vh;
-      overflow: hidden;
     }
     #world {
       flex: 1;
-    }
-    #ui-panel {
-      width: 260px;
-      background: #111;
-      padding: 10px;
-      box-sizing: border-box;
-      border-left: 1px solid #444;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      font-size: 14px;
-    }
-    #lever-area {
       position: relative;
+    }
+    #ui {
+      padding: 8px;
+      background: #111;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    #lever-container {
+      position: absolute;
+      left: 20px;
+      bottom: 40px;
       width: 80px;
-      height: 260px;
-      margin: 0 auto;
-      background: #222;
-      border-radius: 10px;
-      border: 1px solid #555;
-      box-shadow: inset 0 0 8px rgba(0,0,0,0.5);
+      height: 200px;
+      border: 2px solid #555;
+      border-radius: 8px;
+      box-sizing: border-box;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding-bottom: 10px;
     }
     #lever-slot {
-      position: absolute;
-      left: 50%;
-      top: 20px;
-      width: 8px;
-      height: 220px;
-      margin-left: -4px;
+      width: 16px;
+      height: 140px;
       background: #333;
-      border-radius: 4px;
+      border-radius: 8px;
+      position: relative;
+      overflow: visible;
     }
-    #lever-knob {
+    #lever-handle {
       position: absolute;
       left: 50%;
+      transform: translateX(-50%);
       width: 40px;
-      height: 40px;
-      margin-left: -20px;
-      border-radius: 20px;
-      background: #888;
-      border: 2px solid #ccc;
+      height: 24px;
+      background: #cc4444;
+      border-radius: 12px;
       cursor: grab;
-      box-shadow: 0 0 6px rgba(0,0,0,0.6);
+      box-shadow: 0 0 4px rgba(0,0,0,0.7);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 12px;
+      font-size: 10px;
       user-select: none;
     }
-    #lever-knob.dragging {
-      cursor: grabbing;
-      background: #aaa;
+    #lever-power-bar {
+      position: absolute;
+      right: -14px;
+      bottom: 0;
+      width: 6px;
+      height: 140px;
+      background: #333;
+      border-radius: 3px;
+      overflow: hidden;
     }
-    .label {
+    #lever-power-fill {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 0%;
+      background: linear-gradient(to top, #ff9900, #ffee00);
+    }
+    #lever-label {
+      position: absolute;
+      top: 4px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 11px;
+      color: #ddd;
+      text-shadow: 0 0 3px #000;
+    }
+    #info {
       font-size: 13px;
-      color: #ccc;
-    }
-    .value {
-      font-weight: bold;
-      color: #0f0;
+      opacity: 0.9;
     }
     button {
-      padding: 4px 8px;
-      font-size: 13px;
-    }
-    .small {
-      font-size: 11px;
-      color: #999;
+      cursor: pointer;
     }
   </style>
 </head>
 <body>
-
-  <!-- Matter.js のキャンバス領域 -->
-  <div id="world"></div>
-
-  <!-- UI パネル（レバーなど） -->
-  <div id="ui-panel">
-    <div class="label">レバー式 10円玉発射装置</div>
-    <div id="lever-area">
-      <div id="lever-slot"></div>
-      <div id="lever-knob">LEVER</div>
-    </div>
-    <div class="label">
-      引き具合: <span id="pull-amount" class="value">0.00</span>（0〜1）
-    </div>
-    <div class="label">
-      発射パワー: <span id="power" class="value">0.00</span>
-    </div>
-    <div class="label">
-      重力: <input id="gravity" type="number" step="0.1" value="1" style="width:60px;"> (下向き)
-    </div>
-    <button id="spawn-coin">斜面の上に10円を出す</button>
-    <button id="reset">全部リセット</button>
-    <div class="small">
-      操作：レバーを下方向にドラッグして指を離すと、<br>
-      発射位置にいる10円玉を右上方向に打ち出します。
+  <div id="world">
+    <!-- レバー UI -->
+    <div id="lever-container">
+      <div id="lever-slot">
+        <div id="lever-label">レバー</div>
+        <div id="lever-handle">引く</div>
+        <div id="lever-power-bar">
+          <div id="lever-power-fill"></div>
+        </div>
+      </div>
     </div>
   </div>
+  <div id="ui">
+    <button id="spawn-coin">レバー位置に10円をセット</button>
+    <button id="reset">すべてリセット</button>
+    重力:
+    <input id="gravity" type="number" step="0.1" value="1.0" style="width:60px;"> (下向き)
+    <span id="info"></span>
+  </div>
 
-  <!-- Matter.js CDN -->
+  <!-- Matter.js -->
   <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
   <script>
-    // Matter.js エイリアス
-    const Engine = Matter.Engine;
-    const Render = Matter.Render;
-    const Runner = Matter.Runner;
-    const Bodies = Matter.Bodies;
-    const Composite = Matter.Composite;
-    const Body = Matter.Body;
-    const Vector = Matter.Vector;
+    const {
+      Engine, Render, Runner, Bodies, Body, Composite, Events
+    } = Matter;
 
-    // エンジンとワールド
     const engine = Engine.create();
     const world  = engine.world;
-    engine.world.gravity.y = 1.0; // デフォルト重力
+    engine.world.gravity.y = 1.0;
 
-    const width  = window.innerWidth - 260; // UI 分を引いた幅
-    const height = window.innerHeight;
+    const width  = 800;
+    const height = 500;
 
     const render = Render.create({
       element: document.getElementById('world'),
       engine: engine,
       options: {
-        width: width,
-        height: height,
+        width,
+        height,
         wireframes: false,
         background: '#222'
       }
@@ -150,101 +149,57 @@
     const runner = Runner.create();
     Runner.run(runner, engine);
 
-    // 10円玉のパラメータ
+    // ==== 物理シーン構成 ==========================================
+    const WALL_THICKNESS = 40;
+
+    // 左右と下端の壁（縦箱イメージ）
+    const leftWall = Bodies.rectangle(40, height/2, WALL_THICKNESS, height, {
+      isStatic: true,
+      render: { fillStyle: '#444' }
+    });
+    const rightWall = Bodies.rectangle(width - 40, height/2, WALL_THICKNESS, height, {
+      isStatic: true,
+      render: { fillStyle: '#444' }
+    });
+    const floor = Bodies.rectangle(width/2, height - 20, width - 80, WALL_THICKNESS, {
+      isStatic: true,
+      render: { fillStyle: '#555' },
+      restitution: 0.2
+    });
+
+    // 発射エリアの床を少し斜めに（右上方向に飛び出させるための足場）
+    const launchFloor = Bodies.rectangle(170, height - 100, 260, 14, {
+      isStatic: true,
+      angle: -Math.PI / 20, // わずかに右上がり
+      render: { fillStyle: '#666' }
+    });
+
+    // 右側に斜め床：10円が転がっていく斜面
+    const ramp = Bodies.rectangle(width - 220, height - 140, 320, 14, {
+      isStatic: true,
+      angle: -Math.PI / 8, // 右上がりの斜面
+      render: { fillStyle: '#777' }
+    });
+
+    // 角の棒（10円がぶつかる障害物）
+    const peg = Bodies.rectangle(width - 260, height - 220, 16, 80, {
+      isStatic: true,
+      angle: Math.PI / 10,
+      render: { fillStyle: '#999' }
+    });
+
+    Composite.add(world, [leftWall, rightWall, floor, launchFloor, ramp, peg]);
+
+    // ==== 10円玉の設定 ============================================
     const COIN_RADIUS = 11;
     const COIN_MASS   = 0.0055; // 5.5g
+    let coins = [];
 
-    // ステージ構成
-    // 左下に斜面、その右側の角あたりに「発射位置」と「壁の小穴」イメージ
-    const wallThickness = 40;
-
-    // 画面境界の床・天井・左右壁（外枠）
-    const floor = Bodies.rectangle(width/2, height + wallThickness/2, width, wallThickness, {
-      isStatic: true,
-      render: { fillStyle: '#333' }
-    });
-    const ceiling = Bodies.rectangle(width/2, -wallThickness/2, width, wallThickness, {
-      isStatic: true,
-      render: { fillStyle: '#333' }
-    });
-    const leftWall = Bodies.rectangle(-wallThickness/2, height/2, wallThickness, height, {
-      isStatic: true,
-      render: { fillStyle: '#333' }
-    });
-    const rightWall = Bodies.rectangle(width + wallThickness/2, height/2, wallThickness, height, {
-      isStatic: true,
-      render: { fillStyle: '#333' }
-    });
-
-    Composite.add(world, [floor, ceiling, leftWall, rightWall]);
-
-    // 斜めの床（左下から右上へ軽く上っていく）
-    // 中心と長さ・角度を決める
-    const slopeLength = width * 0.9;
-    const slopeAngle  = -Math.PI / 12; // -15度（右に行くほど少し下る感じにもできる）
-    const slope = Bodies.rectangle(
-      width*0.35,           // 中心X
-      height*0.75,          // 中心Y
-      slopeLength,
-      30,
-      {
-        isStatic: true,
-        angle: slopeAngle,
-        render: { fillStyle: '#444' }
-      }
-    );
-    Composite.add(world, slope);
-
-    // 発射位置（斜面の右端近くの角あたり）
-    const LAUNCH_X = width * 0.72;
-    const LAUNCH_Y = height * 0.58;
-
-    // 視覚的な「壁」と「小さな穴」を表現するため
-    const launchWall = Bodies.rectangle(
-      LAUNCH_X + 25,
-      LAUNCH_Y - 10,
-      40,
-      80,
-      {
-        isStatic: true,
-        render: { fillStyle: '#555' }
-      }
-    );
-    Composite.add(world, launchWall);
-
-    // 「10円より小さい隙間」イメージ：物理的には当たり判定なしのガイド用
-    // → 描画専用の簡易オーバーレイをあとで Canvas に描くのはやや複雑なので、
-    //    ここでは、発射穴用の小さなセンサー用 Body を作るが、
-    //    反応しないように isSensor: true にしておく（壁ではない）
-    const launchHole = Bodies.rectangle(
-      LAUNCH_X,
-      LAUNCH_Y,
-      COIN_RADIUS * 1.2,   // 10円より少し小さい幅のイメージ
-      COIN_RADIUS * 0.8,
-      {
-        isStatic: true,
-        isSensor: true,
-        render: {
-          fillStyle: '#222',
-          strokeStyle: '#999',
-          lineWidth: 1
-        }
-      }
-    );
-    Composite.add(world, launchHole);
-
-    // 10円玉生成
-    const coins = [];
-
-    function spawnCoinOnSlope() {
-      // 斜面の左側上のほうから転がってくるように配置
-      const x = width * 0.1 + Math.random() * 30;
-      const y = height * 0.4;
+    function createCoin(x, y) {
       const coin = Bodies.circle(x, y, COIN_RADIUS, {
         mass: COIN_MASS,
-        restitution: 0.2,
-        friction: 0.1,
-        frictionStatic: 0.5,
+        restitution: 0.3,
+        friction: 0.05,
         frictionAir: 0.002,
         render: {
           fillStyle: '#cc8844',
@@ -254,168 +209,180 @@
       });
       coins.push(coin);
       Composite.add(world, coin);
+      return coin;
     }
 
-    // レバー UI 関連
-    const leverArea = document.getElementById('lever-area');
-    const leverKnob = document.getElementById('lever-knob');
-    const pullAmountText = document.getElementById('pull-amount');
-    const powerText = document.getElementById('power');
+    // ==== レバー UI（物理ボディではない） ==========================
+    const leverSlot   = document.getElementById('lever-slot');
+    const leverHandle = document.getElementById('lever-handle');
+    const powerFill   = document.getElementById('lever-power-fill');
+    const infoSpan    = document.getElementById('info');
 
-    const gravityInput = document.getElementById('gravity');
-    const spawnBtn = document.getElementById('spawn-coin');
-    const resetBtn = document.getElementById('reset');
+    // スロット内のレバーの移動範囲
+    const slotRect = leverSlot.getBoundingClientRect();
+    const slotTopOffset    = 20;   // スロット内の上限マージン
+    const slotBottomOffset = 10;   // 下限マージン
+    const leverMinY = slotTopOffset;                            // 一番上（= ほぼ 0 力）
+    const leverMaxY = slotRect.height - slotBottomOffset - 24;  // 24=レバー高さ
+    let dragging = false;
+    let leverStrength = 0;  // 0.0〜1.0 (ばねの溜まり具合)
 
-    // レバーのストローク設定
-    const leverTopY    = 40;               // つまみの一番上の位置（px, area基準）
-    const leverBottomY = 200;              // つまみの一番下の位置
-    const leverStroke  = leverBottomY - leverTopY;
-
-    // 引き量（0〜1, 0=上(未チャージ), 1=最大下）
-    let pullAmount = 0;
-    let isDragging = false;
-    let dragStartY = 0;
-
-    // レバーつまみの初期位置
-    function updateLeverKnobPosition() {
-      const y = leverTopY + leverStroke * pullAmount;
-      leverKnob.style.top = y + 'px';
+    // レバーの初期位置（下の方＝0）
+    function setLeverByStrength(s) {
+      leverStrength = Math.max(0, Math.min(1, s));
+      const y = leverMinY + (leverMaxY - leverMinY) * leverStrength;
+      leverHandle.style.top = y + 'px';
+      powerFill.style.height = (leverStrength * 100) + '%';
     }
-    pullAmount = 0;
-    updateLeverKnobPosition();
-    updateLeverLabel();
+    setLeverByStrength(0);
 
-    function updateLeverLabel() {
-      pullAmountText.textContent = pullAmount.toFixed(2);
-      // バネのように非線形にしてもよいが、まずは線形でパワー計算
-      const power = pullAmount; // 最大1.0
-      powerText.textContent = power.toFixed(2);
+    function onPointerDown(e) {
+      dragging = true;
+      leverHandle.style.cursor = 'grabbing';
+      e.preventDefault();
+    }
+    function onPointerMove(e) {
+      if (!dragging) return;
+      const rect = leverSlot.getBoundingClientRect();
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      const localY = clientY - rect.top - 12; // レバー中心を合わせる
+      const clamped = Math.max(leverMinY, Math.min(leverMaxY, localY));
+      // 上に動かすほど強くなるイメージ（上=1, 下=0）にしたいので反転
+      const strength = 1 - (clamped - leverMinY) / (leverMaxY - leverMinY);
+      setLeverByStrength(strength);
+      updateInfo();
+    }
+    function onPointerUp(e) {
+      if (!dragging) return;
+      dragging = false;
+      leverHandle.style.cursor = 'grab';
+      // 離した瞬間に発射
+      fireFromLever();
+      // レバーはバネで戻るイメージ：アニメ的に0へ
+      smoothResetLever();
     }
 
-    // レバーを話した瞬間に発射
-    function releaseLeverAndShoot() {
-      const power = pullAmount;
-      if (power <= 0.02) {
-        // ほぼ引かれていないなら何もしない
-        pullAmount = 0;
-        updateLeverKnobPosition();
-        updateLeverLabel();
-        return;
-      }
+    leverHandle.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('mouseup', onPointerUp);
 
-      // 発射位置にいるコインを探す：
-      // 「ある範囲にいるオブジェクトをある方向に打ち出す」 → 発射位置周辺のコインを検索
-      const launchRadius = COIN_RADIUS * 1.5; // 発射位置からの許容距離
-      let targetCoin = null;
-      for (const c of coins) {
-        if (c.isSleeping) continue;
-        const dx = c.position.x - LAUNCH_X;
-        const dy = c.position.y - LAUNCH_Y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < launchRadius) {
-          targetCoin = c;
-          break;
+    leverHandle.addEventListener('touchstart', onPointerDown, {passive:false});
+    window.addEventListener('touchmove', onPointerMove, {passive:false});
+    window.addEventListener('touchend', onPointerUp);
+
+    // ==== 発射判定エリア ==========================================
+    // 「10円より小さいすき間から棒が飛び出る」イメージ：
+    // レバー付近に小さな発射エリアを決め、その中にコインがあると発射される。
+    const LAUNCH_AREA = {
+      x: 150,        // 中心X（レバー近く）
+      y: height - 120,
+      w: 40,
+      h: 40
+    };
+
+    // デバッグ可視化用に、透明な四角を追加（色は薄め）
+    const launchAreaBody = Bodies.rectangle(
+      LAUNCH_AREA.x,
+      LAUNCH_AREA.y,
+      LAUNCH_AREA.w,
+      LAUNCH_AREA.h,
+      {
+        isStatic: true,
+        isSensor: true,
+        render: {
+          fillStyle: 'rgba(0, 255, 0, 0.1)',
+          strokeStyle: 'rgba(0, 255, 0, 0.6)',
+          lineWidth: 1
         }
       }
+    );
+    Composite.add(world, launchAreaBody);
 
-      if (targetCoin) {
-        // 発射方向：右上（棒が隙間から突き出すイメージ）
-        // 角度は 30度〜45度くらいがそれっぽい
-        const angle = -Math.PI / 4; // -45度
-        const direction = Vector.create(Math.cos(angle), Math.sin(angle));
+    // ==== レバーの力を 10円に伝える（打ち出し） =====================
+    function fireFromLever() {
+      const MIN_POWER = 2.0;   // ほとんど引いていないときの最低パワー
+      const MAX_POWER = 18.0;  // フルパワー
+      const s = leverStrength;
+      if (s <= 0.02) return;   // ほぼゼロなら何もしない
 
-        // パワーから初速を計算（お好みで倍率調整可能）
-        const baseSpeed = 25; // 調整用係数
-        const speed = baseSpeed * power;
+      const power = MIN_POWER + (MAX_POWER - MIN_POWER) * s;
 
-        const velocity = Vector.mult(direction, speed);
+      // 発射方向：右上（斜め45度くらい）
+      const angle = -Math.PI / 4;
+      const vx = power * Math.cos(angle);
+      const vy = power * Math.sin(angle);
 
-        Body.setVelocity(targetCoin, velocity);
-      }
+      // 発射エリアにあるコインを探す
+      coins.forEach(coin => {
+        const { x, y } = coin.position;
+        const inArea =
+          x > (LAUNCH_AREA.x - LAUNCH_AREA.w / 2) &&
+          x < (LAUNCH_AREA.x + LAUNCH_AREA.w / 2) &&
+          y > (LAUNCH_AREA.y - LAUNCH_AREA.h / 2) &&
+          y < (LAUNCH_AREA.y + LAUNCH_AREA.h / 2);
 
-      // レバーをバネで戻したイメージにする（アニメっぽいが、ここでは即座に0に戻す）
-      pullAmount = 0;
-      updateLeverKnobPosition();
-      updateLeverLabel();
+        if (inArea) {
+          Body.setVelocity(coin, { x: vx, y: vy });
+        }
+      });
     }
 
-    // レバーのドラッグ処理
-    leverKnob.addEventListener('mousedown', (e) => {
-      isDragging = true;
-      leverKnob.classList.add('dragging');
-      dragStartY = e.clientY;
-      e.preventDefault();
-    });
-    window.addEventListener('mousemove', (e) => {
-      if (!isDragging) return;
-      const rect = leverArea.getBoundingClientRect();
-      const localY = e.clientY - rect.top;
+    // レバーをゆっくり戻すアニメーション
+    function smoothResetLever() {
+      const start = leverStrength;
+      const duration = 200; // ms
+      const startTime = performance.now();
 
-      // localY を leverTopY〜leverBottomY の範囲にクランプ
-      const clampedY = Math.max(leverTopY, Math.min(leverBottomY, localY));
-      pullAmount = (clampedY - leverTopY) / leverStroke;
-      updateLeverKnobPosition();
-      updateLeverLabel();
-    });
-    window.addEventListener('mouseup', (e) => {
-      if (!isDragging) return;
-      isDragging = false;
-      leverKnob.classList.remove('dragging');
-      // 指を離した瞬間に発射
-      releaseLeverAndShoot();
-    });
+      function step(now) {
+        const t = (now - startTime) / duration;
+        if (t >= 1) {
+          setLeverByStrength(0);
+          updateInfo();
+          return;
+        }
+        const eased = start * (1 - t*t); // 簡単な加速減速
+        setLeverByStrength(eased);
+        updateInfo();
+        requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    }
 
-    // タッチ操作対応
-    leverKnob.addEventListener('touchstart', (e) => {
-      isDragging = true;
-      leverKnob.classList.add('dragging');
-      e.preventDefault();
-    }, { passive: false });
-    window.addEventListener('touchmove', (e) => {
-      if (!isDragging) return;
-      const touch = e.touches[0];
-      const rect = leverArea.getBoundingClientRect();
-      const localY = touch.clientY - rect.top;
-      const clampedY = Math.max(leverTopY, Math.min(leverBottomY, localY));
-      pullAmount = (clampedY - leverTopY) / leverStroke;
-      updateLeverKnobPosition();
-      updateLeverLabel();
-      e.preventDefault();
-    }, { passive: false });
-    window.addEventListener('touchend', (e) => {
-      if (!isDragging) return;
-      isDragging = false;
-      leverKnob.classList.remove('dragging');
-      releaseLeverAndShoot();
-      e.preventDefault();
-    }, { passive: false });
-
-    // 重力変更
-    gravityInput.addEventListener('input', (e) => {
+    // ==== UI ボタンなど =============================================
+    document.getElementById('gravity').addEventListener('input', (e) => {
       const g = parseFloat(e.target.value) || 0;
       engine.world.gravity.y = g;
     });
 
-    // 10円を斜面上に追加
-    spawnBtn.addEventListener('click', () => {
-      spawnCoinOnSlope();
+    document.getElementById('spawn-coin').addEventListener('click', () => {
+      // レバー側の発射エリアに10円をセット
+      createCoin(LAUNCH_AREA.x, LAUNCH_AREA.y + 5);
     });
 
-    // リセット
-    resetBtn.addEventListener('click', () => {
-      // すべてのコイン削除
-      for (const c of coins) {
-        Composite.remove(world, c);
-      }
-      coins.length = 0;
-
-      pullAmount = 0;
-      updateLeverKnobPosition();
-      updateLeverLabel();
+    document.getElementById('reset').addEventListener('click', () => {
+      coins.forEach(c => Composite.remove(world, c));
+      coins = [];
+      setLeverByStrength(0);
+      updateInfo();
     });
 
-    // 最初に1枚だけ出しておく
-    spawnCoinOnSlope();
+    function updateInfo() {
+      infoSpan.textContent = `レバー引き具合: ${(leverStrength * 100).toFixed(0)}%`;
+    }
+    updateInfo();
+
+    // ==== 補足：イベントなど ========================================
+
+    // コインが画面外に行き過ぎたら削除
+    Events.on(engine, 'afterUpdate', () => {
+      const margin = 200;
+      coins = coins.filter(c => {
+        const { x, y } = c.position;
+        const alive = (x > -margin && x < width + margin && y > -margin && y < height + margin);
+        if (!alive) Composite.remove(world, c);
+        return alive;
+      });
+    });
   </script>
 </body>
 </html>
