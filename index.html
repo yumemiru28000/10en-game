@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>10円ゲーム & ミニゲム集</title>
+  <title>10円ゲーム & ミニゲーム集</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <style>
@@ -108,11 +108,13 @@
       box-shadow: 0 0 20px rgba(0,0,0,0.7);
     }
 
+    /* 表示だけ少しズーム（物理サイズ 282x521 はそのまま） */
     #gameCanvas {
       display: block;
-      width: 100%;
+      width: 110%;       /* ここを変えるとズーム倍率が変わる */
       height: auto;
       background: #000;
+      transform: translateX(-5%); /* 中央寄せ */
     }
 
     .top-right-menu {
@@ -166,7 +168,7 @@
 
     .lever-slider {
       width: 70px;
-      pointer-events: none; /* 長押しドラッグ専用 */
+      pointer-events: none;
     }
 
     .lever-label {
@@ -401,7 +403,7 @@
     const newRef = push(WAITING_REF);
     await set(newRef, { name, time: serverTimestamp() });
     touchAction();
-    infoMsgEl.textContent = '待機列に入りました。譲り合って遊んでく���さい。';
+    infoMsgEl.textContent = '待機列に入りました。譲り合って遊んでください。';
   });
 
   endGameBtn.addEventListener('click', async () => {
@@ -530,8 +532,8 @@
       for(let dy=0;dy<20;dy++){
         const tx=sx, ty=sy+dy;
         let ok=true;
-        for(let i=0;i<12;i++){
-          const ang=Math.PI*2*i/12;
+        for(let i=0;i<16;i++){
+          const ang=Math.PI*2*i/16;
           const ex=tx+Math.cos(ang)*coin.r;
           const ey=ty+Math.sin(ang)*coin.r;
           if(renData && isBlackPixel(renData,ex,ey)){ ok=false; break; }
@@ -547,63 +549,71 @@
 
   const gravity=0.7, friction=0.012, bounce=0.25;
 
-  // ★ v11＋サブステップ方式
+  // ★ 完全押し出しロジック：ren黒と円周が重ならなくなるまで押し出す
   function updatePhysics(){
     if (!coin.inPlay || coin.cleared || coin.failed) return;
 
-    const SUB_STEPS = 4; // サブステップ数
-
+    const SUB_STEPS = 4;
     const stepGravity = gravity / SUB_STEPS;
     const stepFriction = 1 - Math.pow(1 - friction, 1 / SUB_STEPS);
+    const sampleCount = 16;
 
     for (let s = 0; s < SUB_STEPS; s++) {
-      const prevX = coin.x;
-      const prevY = coin.y;
+      // 直前位置（バックアップ）
+      let prevX = coin.x;
+      let prevY = coin.y;
 
-      // 1) 少しだけ重力
+      // 1) 力を少しだけ適用
       coin.vy += stepGravity;
-
-      // 2) 少しだけ減速
       coin.vx *= (1 - stepFriction);
       coin.vy *= (1 - stepFriction);
 
-      // 3) 少しだけ移動
+      // 2) 少しだけ移動
       coin.x += coin.vx / SUB_STEPS;
       coin.y += coin.vy / SUB_STEPS;
 
-      // 4) ren との衝突チェック（円周サンプル）
+      // 3) renと重なっている間は押し出し続ける
       if (renData) {
-        const sampleCount = 12;
-        let hitLeft = false, hitRight = false, hitTop = false, hitBottom = false;
-        let anyHit = false;
+        for (let iter = 0; iter < 5; iter++) { // 最大5回押し出し
+          let nxSum = 0, nySum = 0, hitCount = 0;
 
-        for (let i = 0; i < sampleCount; i++) {
-          const ang = Math.PI * 2 * i / sampleCount;
-          const sx = coin.x + Math.cos(ang) * coin.r;
-          const sy = coin.y + Math.sin(ang) * coin.r;
-          if (isBlackPixel(renData, sx, sy)) {
-            anyHit = true;
-            if (Math.cos(ang) < -0.5) hitLeft = true;
-            if (Math.cos(ang) >  0.5) hitRight = true;
-            if (Math.sin(ang) < -0.5) hitTop = true;
-            if (Math.sin(ang) >  0.5) hitBottom = true;
+          for (let i = 0; i < sampleCount; i++) {
+            const ang = Math.PI * 2 * i / sampleCount;
+            const sx = coin.x + Math.cos(ang) * coin.r;
+            const sy = coin.y + Math.sin(ang) * coin.r;
+            if (isBlackPixel(renData, sx, sy)) {
+              // 円中心→このサンプル方向ベクトル＝外向き法線の近似
+              nxSum += Math.cos(ang);
+              nySum += Math.sin(ang);
+              hitCount++;
+            }
           }
-        }
 
-        if (anyHit) {
-          // 少しだけ前の位置に戻す（めり込み軽減）
-          coin.x = (coin.x + prevX) / 2;
-          coin.y = (coin.y + prevY) / 2;
+          if (!hitCount) break; // どの方向にも当たってなければ完了
 
-          // 当たった方向の速度を反転＆減衰（バウンド）
-          if (hitLeft  && coin.vx < 0) coin.vx *= -bounce;
-          if (hitRight && coin.vx > 0) coin.vx *= -bounce;
-          if (hitTop   && coin.vy < 0) coin.vy *= -bounce;
-          if (hitBottom&& coin.vy > 0) coin.vy *= -bounce;
+          // 平均法線（外向き）
+          let nx = nxSum / hitCount;
+          let ny = nySum / hitCount;
+          const len = Math.sqrt(nx*nx + ny*ny) || 1;
+          nx /= len; ny /= len;
+
+          // 壁にめり込む原因＝法線方向速度を殺す
+          const vDotN = coin.vx*nx + coin.vy*ny;
+          const vnX = vDotN * nx;
+          const vnY = vDotN * ny;
+          const vtX = coin.vx - vnX;
+          const vtY = coin.vy - vnY;
+          coin.vx = vtX;
+          coin.vy = vtY;
+
+          // 法線方向へ押し出す
+          const pushOut = 1.5; // 小さめに押し出しを複数回
+          coin.x += nx * pushOut;
+          coin.y += ny * pushOut;
         }
       }
 
-      // 5) 枠チェック（サブステップ中も）
+      // 4) 枠（サブステップ中もチェック）
       if (coin.x - coin.r < 0) {
         coin.x = coin.r;
         if (coin.vx < 0) coin.vx *= -bounce;
@@ -622,7 +632,7 @@
       }
     }
 
-    // 6) 1フレームの終わりに穴判定
+    // 5) 穴判定
     if (anaData && isBlackPixel(anaData, coin.x, coin.y)) {
       coin.inPlay=false; coin.failed=true;
       infoMsgEl.textContent='失敗…。また挑戦してね。';
@@ -632,14 +642,14 @@
       infoMsgEl.textContent='SUCCESS！おめでとう！';
     }
 
-    // 7) 回転
+    // 6) 回転
     const speed=Math.sqrt(coin.vx*coin.vx+coin.vy*coin.vy);
     const maxSpin=0.25;
     const spin=Math.min(maxSpin,speed*0.03);
     coin.angle += spin;
   }
 
-  // ========= レバーUI（v11のまま） =========
+  // ========= レバーUI（v11と同じ仕様） =========
   function setupLeversUI(){
     leftLeverCol.innerHTML='';
     rightLeverCol.innerHTML='';
