@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>10円 vs ren���来の坂（画像サイズ優先 + CCD + 大きい10円）</title>
+  <title>10円 vs ren + kaisi（画像サイズ優先 + 円CCD + 3倍サイズ）</title>
   <style>
     body {
       margin: 0;
@@ -31,11 +31,11 @@
 </head>
 <body>
   <div id="info">
-    ・map.png / ren.png の実サイズにキャンバスを合わせます（画像サイズ優先）。<br>
-    ・ren.png から水平線を簡易抽出して「板（線分）」として扱います。<br>
-    ・10円は半径を3倍にして、円の「縁」が坂に当たるように補正しています。<br>
-    ・移動は「前位置→次位置」の線分と、板線分を半径ぶんオフセットした線との交差で判定（簡易CCD）。<br>
-    ・坂の上では、坂方向の重力＋摩擦で自然に転がるように調整しています。
+    ・map.png / ren.png / kaisi.png の実サイズそのままをキャンバスに使用（拡大縮小なし）。<br>
+    ・ren.png の黒線を走査して、横方向の連続黒を「板（線分）」として抽出。<br>
+    ・kaisi.png の黒いピクセルからランダムに10円（半径36px=3倍）を生成。<br>
+    ・10円の移動は「前位置→次位置の線分」と板線分の交差＋半径補正によるCCDで貫通を防止。<br>
+    ・坂の角度に応じて坂方向に加速し、摩擦で止まる挙動になっています。
   </div>
 
   <div id="canvasWrapper">
@@ -44,9 +44,9 @@
 
   <div id="controlPanel">
     重力: <input id="gravityInput" type="number" step="0.1" value="0.5">
-    摩擦: <input id="frictionInput" type="number" step="0.01" value="0.01">
+    摩擦: <input id="frictionInput" type="number" step="0.01" value="0.02">
     静止閾値: <input id="staticInput" type="number" step="0.01" value="0.02">
-    <button id="resetCoinBtn">10円リセット</button>
+    <button id="resetCoinBtn">10円リセット（kaisi黒から）</button>
     <button id="playPauseBtn">一時停止</button>
   </div>
 
@@ -59,30 +59,38 @@
     const resetCoinBtn = document.getElementById("resetCoinBtn");
     const playPauseBtn = document.getElementById("playPauseBtn");
 
-    // ローカルに置いた画像ファイル
-    const MAP_URL = "map.png";
-    const REN_URL = "ren.png";
+    // 同じフォルダにある画像ファイルを使う前提
+    const MAP_URL   = "map.png";
+    const REN_URL   = "ren.png";
+    const KAISI_URL = "kaisi.png";
 
-    const bgImage  = new Image();
-    const renImage = new Image();
+    const bgImage    = new Image();
+    const renImage   = new Image();
+    const kaisiImage = new Image();
     let imagesLoaded = 0;
 
-    bgImage.src  = MAP_URL;
-    renImage.src = REN_URL;
+    bgImage.src    = MAP_URL;
+    renImage.src   = REN_URL;
+    kaisiImage.src = KAISI_URL;
 
-    bgImage.onload  = onImageLoaded;
-    renImage.onload = onImageLoaded;
+    bgImage.onload    = onImageLoaded;
+    renImage.onload   = onImageLoaded;
+    kaisiImage.onload = onImageLoaded;
 
-    // ren解析用キャンバス
-    const renCanvas = document.createElement("canvas");
-    const renCtx    = renCanvas.getContext("2d");
-    let renData = null;
+    // 解析用キャンバス
+    const renCanvas   = document.createElement("canvas");
+    const renCtx      = renCanvas.getContext("2d");
+    let renData       = null;
+
+    const kaisiCanvas = document.createElement("canvas");
+    const kaisiCtx    = kaisiCanvas.getContext("2d");
+    let kaisiData     = null;
+    let startPixels   = []; // {x,y} の配列（kaisi 黒）
 
     // 物理パラメータ
     let GRAVITY = parseFloat(gravityInput.value) || 0.5;
-    // 摩擦を少し弱めにして「よく転がる」ように
-    let SLOPE_FRICTION = parseFloat(frictionInput.value) || 0.01;
-    let STATIC_THRESHOLD = parseFloat(staticInput.value) || 0.02;
+    let SLOPE_FRICTION    = parseFloat(frictionInput.value) || 0.02;
+    let STATIC_THRESHOLD  = parseFloat(staticInput.value)   || 0.02;
 
     gravityInput.addEventListener("input", () => {
       GRAVITY = parseFloat(gravityInput.value) || GRAVITY;
@@ -94,13 +102,13 @@
       STATIC_THRESHOLD = parseFloat(staticInput.value) || STATIC_THRESHOLD;
     });
 
+    // 10円（半径3倍）
     const coin = {
       x: 0,
       y: 0,
       vx: 0,
       vy: 0,
-      // ★ 半径を3倍に（元12 → 36）
-      r: 36
+      r: 36  // ★ 以前の 12 の 3倍
     };
 
     // ren由来の板（坂）線分
@@ -113,12 +121,12 @@
     });
 
     resetCoinBtn.addEventListener("click", () => {
-      resetCoinOnFirstSlope();
+      resetCoinFromKaisi();
     });
 
     function onImageLoaded() {
       imagesLoaded++;
-      if (imagesLoaded === 2) {
+      if (imagesLoaded === 3) {
         initAfterImagesLoaded();
       }
     }
@@ -130,28 +138,35 @@
       canvas.width  = w;
       canvas.height = h;
 
-      // renCanvas も同じサイズで生成
+      // renCanvas / kaisiCanvas も同じサイズ
       renCanvas.width  = w;
       renCanvas.height = h;
       renCtx.drawImage(renImage, 0, 0, w, h);
       renData = renCtx.getImageData(0, 0, w, h);
 
+      kaisiCanvas.width  = w;
+      kaisiCanvas.height = h;
+      kaisiCtx.drawImage(kaisiImage, 0, 0, w, h);
+      kaisiData = kaisiCtx.getImageData(0, 0, w, h);
+
       extractSlopesFromRen();
-      resetCoinOnFirstSlope();
+      extractStartPixelsFromKaisi();
+
+      resetCoinFromKaisi();
       loop();
     }
 
-    // 黒判定
-    function isBlackAt(x, y) {
-      if (!renData) return false;
+    // 黒判定（共通）
+    function isBlackAt(imgData, x, y) {
+      if (!imgData) return false;
       const ix = Math.floor(x), iy = Math.floor(y);
-      if (ix < 0 || iy < 0 || ix >= renData.width || iy >= renData.height) return false;
-      const idx = (iy * renData.width + ix) * 4;
-      const r = renData.data[idx], g = renData.data[idx+1], b = renData.data[idx+2], a = renData.data[idx+3];
+      if (ix < 0 || iy < 0 || ix >= imgData.width || iy >= imgData.height) return false;
+      const idx = (iy * imgData.width + ix) * 4;
+      const r = imgData.data[idx], g = imgData.data[idx+1], b = imgData.data[idx+2], a = imgData.data[idx+3];
       return a > 20 && r < 40 && g < 40 && b < 40;
     }
 
-    // ren から「横方向の連続黒」を線分として抽出（ラフ版）
+    // ren から「横方向の連続黒」を線分として抽出（ラフ）
     function extractSlopesFromRen() {
       slopes.length = 0;
       const w = renData.width;
@@ -160,10 +175,10 @@
       for (let y = 0; y < h; y += 2) {
         let x = 0;
         while (x < w) {
-          while (x < w && !isBlackAt(x, y)) x++;
+          while (x < w && !isBlackAt(renData, x, y)) x++;
           if (x >= w) break;
           const startX = x;
-          while (x < w && isBlackAt(x, y)) x++;
+          while (x < w && isBlackAt(renData, x, y)) x++;
           const endX = x - 1;
           const length = endX - startX;
           if (length > 8) {
@@ -179,28 +194,38 @@
       console.log("抽出された坂の本数:", slopes.length);
     }
 
-    function resetCoinOnFirstSlope() {
-      if (slopes.length === 0) {
+    // kaisi の黒ピクセル全てをスタート候補に
+    function extractStartPixelsFromKaisi() {
+      startPixels = [];
+      if (!kaisiData) return;
+      const w = kaisiData.width;
+      const h = kaisiData.height;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          if (isBlackAt(kaisiData, x, y)) {
+            startPixels.push({ x, y });
+          }
+        }
+      }
+      console.log("kaisi 黒ピクセル数:", startPixels.length);
+    }
+
+    function resetCoinFromKaisi() {
+      if (!startPixels.length) {
         coin.x = canvas.width/2;
         coin.y = 50;
       } else {
-        const s = slopes[0];
-        const mx = (s.x1 + s.x2) / 2;
-        const my = (s.y1 + s.y2) / 2;
-        const dx = s.x2 - s.x1;
-        const dy = s.y2 - s.y1;
-        const len = Math.sqrt(dx*dx + dy*dy) || 1;
-        const nx = -(dy/len);
-        const ny =  (dx/len);
-        // 板の外側に半径ぶ��乗せる
-        coin.x = mx + nx * coin.r;
-        coin.y = my + ny * coin.r;
+        const idx = Math.floor(Math.random() * startPixels.length);
+        const { x, y } = startPixels[idx];
+        // 大きくなった分、少しだけ上にずらしてスタート
+        coin.x = x;
+        coin.y = y - coin.r * 0.3;
       }
       coin.vx = 0;
       coin.vy = 0;
     }
 
-    // 線分交差判定（p1→p2 と p3→p4 が交差するか & 交点）
+    // 線分交差判定（中心線 vs 板線分）
     function segmentIntersection(p1, p2, p3, p4) {
       const x1 = p1.x, y1 = p1.y;
       const x2 = p2.x, y2 = p2.y;
@@ -208,7 +233,7 @@
       const x4 = p4.x, y4 = p4.y;
 
       const denom = (x1-x2)*(y3-y4) - (y1-y2)*(x3-x4);
-      if (Math.abs(denom) < 1e-8) return null; // 平行 or 同一直線
+      if (Math.abs(denom) < 1e-8) return null;
 
       const t = ((x1-x3)*(y3-y4) - (y1-y3)*(x3-x4)) / denom;
       const u = -((x1-x2)*(y1-y3) - (y1-y2)*(x1-x3)) / denom;
@@ -224,11 +249,13 @@
       if (paused) return;
       if (!renData) return;
 
-      // 1. 前フレーム位置
+      // 前フレーム位置
       const prev = { x: coin.x, y: coin.y };
 
-      // 2. 重力適用
+      // 重力
       coin.vy += GRAVITY;
+
+      // 候補の次位置（まだ確定させない）
       const next = {
         x: coin.x + coin.vx,
         y: coin.y + coin.vy
@@ -237,28 +264,15 @@
       let earliestHit = null;
 
       for (const s of slopes) {
-        // 板の接線・法線
-        const dx = s.x2 - s.x1;
-        const dy = s.y2 - s.y1;
-        const len = Math.sqrt(dx*dx + dy*dy) || 1;
-        const tx = dx / len;
-        const ty = dy / len;
-        const nx = -ty;
-        const ny =  tx;
-
-        // 円の中心線ではなく、「円の縁」が当たる位置を考える：
-        // 板線分を、法線方向に半径ぶん外側へオフセットした線と
-        // 中心の移動線分との交差を調べる。
-        const offset = coin.r;
-
-        const p3 = { x: s.x1 + nx * offset, y: s.y1 + ny * offset };
-        const p4 = { x: s.x2 + nx * offset, y: s.y2 + ny * offset };
-
-        const hit = segmentIntersection(prev, next, p3, p4);
+        const p1 = prev;
+        const p2 = next;
+        const p3 = { x: s.x1, y: s.y1 };
+        const p4 = { x: s.x2, y: s.y2 };
+        const hit = segmentIntersection(p1, p2, p3, p4);
         if (!hit) continue;
 
         if (!earliestHit || hit.t < earliestHit.hit.t) {
-          earliestHit = { hit, slope: s, nx, ny, tx, ty };
+          earliestHit = { hit, slope: s };
         }
       }
 
@@ -267,24 +281,31 @@
         coin.x = next.x;
         coin.y = next.y;
       } else {
-        const { hit, slope, nx, ny, tx, ty } = earliestHit;
+        const { hit, slope } = earliestHit;
 
-        // 4. 衝突した瞬間の円の中心位置は、
-        //    「オフセット線との交点」よりも法線方向に 逆向きに半径だけ戻した位置。
-        coin.x = hit.x - nx * coin.r;
-        coin.y = hit.y - ny * coin.r;
+        // 板の方向ベクトル
+        const dx = slope.x2 - slope.x1;
+        const dy = slope.y2 - slope.y1;
+        const len = Math.sqrt(dx*dx + dy*dy) || 1;
+        const tx = dx / len; // 接線
+        const ty = dy / len;
+        const nx = -ty;      // 法線（板の“上”方向とみなす）
 
-        // 5. 板に沿う/垂直の速度成分
+        // 中心線と板線の交点から、法線方向に半径分ずらして「接触位置」にする
+        coin.x = hit.x + nx * coin.r;
+        coin.y = hit.y + ny * coin.r;
+
+        // 速度を分解
         const vpx = coin.vx;
         const vpy = coin.vy;
         const v_parallel = vpx * tx + vpy * ty;
         let v_normal   = vpx * nx + vpy * ny;
 
-        // 法線速度はほぼ殺す（ごくわずかにバウンドさせたければ 0.1 などにする）
-        const BOUNCE = 0.0;
+        // 法線速度は軽く反射 or 殺す
+        const BOUNCE = 0.0; // 反射させたければ 0.2 とか
         v_normal = -v_normal * BOUNCE;
 
-        // 坂に沿った重力加速度（このフレーム分）
+        // 坂に沿った重力成分
         const g_parallel = GRAVITY * ty;
         let new_v_parallel = v_parallel + g_parallel;
 
@@ -293,14 +314,11 @@
             Math.abs(v_parallel) < STATIC_THRESHOLD) {
           new_v_parallel = 0;
         } else {
-          // 動摩擦：少しだけ減衰（よく転がるように）
           new_v_parallel *= (1 - SLOPE_FRICTION);
         }
 
         coin.vx = new_v_parallel * tx + v_normal * nx;
         coin.vy = new_v_parallel * ty + v_normal * ny;
-
-        // このフレームはここで移動終了（再貫通防止）
       }
 
       // 画面枠
@@ -327,9 +345,10 @@
       if (!bgImage.complete) return;
 
       ctx.clearRect(0,0,canvas.width,canvas.height);
+      // map を画像サイズそのままで描画
       ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
 
-      // ren由来の板
+      // ren 由来の板
       ctx.strokeStyle = "#44aaff";
       ctx.lineWidth = 2;
       for (const s of slopes) {
@@ -339,7 +358,7 @@
         ctx.stroke();
       }
 
-      // 10円（3倍サイズ）
+      // 10円
       ctx.save();
       ctx.translate(coin.x, coin.y);
       ctx.fillStyle = "#cc8844";
@@ -347,7 +366,7 @@
       ctx.arc(0,0,coin.r,0,Math.PI*2);
       ctx.fill();
       ctx.fillStyle = "#5b3a10";
-      ctx.font = "bold 18px sans-serif";
+      ctx.font = "bold 16px sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText("10",0,0);
@@ -356,7 +375,7 @@
 
     function loop() {
       requestAnimationFrame(loop);
-      if (!renData) return;
+      if (!renData || !kaisiData) return;
       updatePhysics();
       draw();
     }
