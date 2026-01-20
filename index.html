@@ -140,7 +140,7 @@
       top: 0;
       width: 100%;
       height: 100%;
-      pointer-events: none; /* スライダーだけにイベントを通す */
+      pointer-events: none;
     }
 
     .lever-ui {
@@ -224,7 +224,6 @@
 
     <div id="gameContainer">
       <canvas id="gameCanvas" width="282" height="521"></canvas>
-      <!-- レバーUIをキャンバス上に重ねる -->
       <div id="leverOverlay"></div>
     </div>
 
@@ -256,9 +255,7 @@
 </div>
 
 <script type="module">
-  // ==========================
-  // Firebase 初期化
-  // ==========================
+  // --- Firebase 初期化（省略せずそのまま） ---
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-app.js";
   import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-analytics.js";
   import {
@@ -286,40 +283,26 @@
   const analytics = getAnalytics(app);
   const db = getDatabase(app);
 
-  // ==========================
   // 画面切り替え
-  // ==========================
   const screens = {
     menu: document.getElementById('screen-menu'),
     name: document.getElementById('screen-name'),
     ten: document.getElementById('screen-10yen'),
     janken: document.getElementById('screen-janken'),
   };
-
   function showScreen(key) {
     Object.values(screens).forEach(el => el.classList.remove('active'));
     screens[key].classList.add('active');
   }
+  document.getElementById('toNameInputBtn').addEventListener('click', () => showScreen('name'));
+  document.getElementById('toJankenBtn').addEventListener('click', () => showScreen('janken'));
+  document.getElementById('backToMenuBtn').addEventListener('click', () => showScreen('menu'));
 
-  document.getElementById('toNameInputBtn').addEventListener('click', () => {
-    showScreen('name');
-  });
-  document.getElementById('toJankenBtn').addEventListener('click', () => {
-    showScreen('janken');
-  });
-  document.getElementById('backToMenuBtn').addEventListener('click', () => {
-    showScreen('menu');
-  });
-
-  // ==========================
   // 名前管理
-  // ==========================
   const nameInput = document.getElementById('playerNameInput');
   const decideNameBtn = document.getElementById('decideNameBtn');
-
   let myName = localStorage.getItem('10yen_name') || '';
   if (myName) nameInput.value = myName;
-
   decideNameBtn.addEventListener('click', () => {
     const v = nameInput.value.trim();
     myName = v || 'Player';
@@ -327,9 +310,7 @@
     showScreen('ten');
   });
 
-  // ==========================
   // Firebase 状態
-  // ==========================
   const playingNameEl = document.getElementById('playingName');
   const waitingNamesEl = document.getElementById('waitingNames');
   const stateLabelEl = document.getElementById('stateLabel');
@@ -350,6 +331,10 @@
     if (!currentPlaying || !currentPlaying.name) return 'A';
     if (currentPlaying.name === myName) return 'C';
     return 'B';
+  }
+
+  function setLeverEnabled(flag) {
+    leverStates.forEach(l => { l.slider.disabled = !flag; });
   }
 
   function updateUIState() {
@@ -380,27 +365,13 @@
       const names = waitingList.map(w => w.name).join(' / ');
       waitingNamesEl.textContent = `${waitingList.length}人（${names}）`;
     }
-
     playingNameEl.textContent = currentPlaying?.name || '-';
   }
 
-  function setLeverEnabled(flag) {
-    leverStates.forEach(l => {
-      l.slider.disabled = !flag;
-    });
-  }
-
-  onValue(PLAYING_REF, snap => {
-    currentPlaying = snap.val() || null;
-    updateUIState();
-  });
-
+  onValue(PLAYING_REF, snap => { currentPlaying = snap.val() || null; updateUIState(); });
   onValue(WAITING_REF, snap => {
     const val = snap.val() || {};
-    waitingList = Object.keys(val).map(id => ({
-      id,
-      name: val[id].name || 'Player'
-    }));
+    waitingList = Object.keys(val).map(id => ({ id, name: val[id].name || 'Player' }));
     updateUIState();
   });
 
@@ -421,8 +392,7 @@
 
   waitBtn.addEventListener('click', async () => {
     const name = myName || 'Player';
-    const already = waitingList.find(w => w.name === name);
-    if (already) {
+    if (waitingList.find(w => w.name === name)) {
       infoMsgEl.textContent = 'すでに待機リストに入っています。';
       return;
     }
@@ -442,7 +412,7 @@
   });
 
   let idleTimer = null;
-  ['click', 'input'].forEach(ev => {
+  ['click','input'].forEach(ev => {
     document.addEventListener(ev, () => {
       if (calcState() === 'C') {
         if (idleTimer) clearTimeout(idleTimer);
@@ -452,51 +422,34 @@
             infoMsgEl.textContent = '操作がなかったため、自動で終了しました。';
             resetCoin();
           }
-        }, 60 * 1000);
+        }, 60000);
       }
     });
   });
 
-  // ==========================
-  // PNG 読み込み＆物理
-  // ==========================
+  // ===== PNG & 物理 =====
   const canvas = document.getElementById('gameCanvas');
   const ctx = canvas.getContext('2d');
   const leverOverlay = document.getElementById('leverOverlay');
 
-  const images = {
-    map: null,
-    ren: null,
-    ana: null,
-    atari: null,
-    kaisi: null,
-    reba: null,
-    reba1: null,
-  };
-
+  const images = { map:null, ren:null, ana:null, atari:null, kaisi:null, reba:null, reba1:null };
   const hitCanvas = document.createElement('canvas');
   const hitCtx = hitCanvas.getContext('2d');
-  let renData = null;
-  let anaData = null;
-  let atariData = null;
-  let kaisiData = null;
+  let renData=null, anaData=null, atariData=null, kaisiData=null;
 
-  function loadImage(key, url) {
-    return new Promise((resolve, reject) => {
-      if (!url) {
-        resolve();
-        return;
-      }
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => { images[key] = img; resolve(); };
-      img.onerror = reject;
-      img.src = url;
+  function loadImage(key,url){
+    return new Promise((resolve,reject)=>{
+      if(!url){resolve();return;}
+      const img=new Image();
+      img.crossOrigin="anonymous";
+      img.onload=()=>{images[key]=img;resolve();};
+      img.onerror=reject;
+      img.src=url;
     });
   }
 
-  async function loadAssets() {
-    const base = "https://raw.githubusercontent.com/yumemiru28000/10en-game/main";
+  async function loadAssets(){
+    const base="https://raw.githubusercontent.com/yumemiru28000/10en-game/main";
 
     await loadImage('map',   `${base}/map.png`);
     await loadImage('ren',   `${base}/ren.png`);
@@ -506,427 +459,291 @@
     await loadImage('reba',  `${base}/reba.png`);
     await loadImage('reba1', `${base}/reba1.png`);
 
-    hitCanvas.width  = canvas.width;
-    hitCanvas.height = canvas.height;
+    hitCanvas.width = canvas.width;
+    hitCanvas.height= canvas.height;
 
-    if (images.ren) {
+    if(images.ren){
       hitCtx.clearRect(0,0,hitCanvas.width,hitCanvas.height);
       hitCtx.drawImage(images.ren,0,0,hitCanvas.width,hitCanvas.height);
-      renData = hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
+      renData=hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
     }
-    if (images.ana) {
+    if(images.ana){
       hitCtx.clearRect(0,0,hitCanvas.width,hitCanvas.height);
       hitCtx.drawImage(images.ana,0,0,hitCanvas.width,hitCanvas.height);
-      anaData = hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
+      anaData=hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
     }
-    if (images.atari) {
+    if(images.atari){
       hitCtx.clearRect(0,0,hitCanvas.width,hitCanvas.height);
       hitCtx.drawImage(images.atari,0,0,hitCanvas.width,hitCanvas.height);
-      atariData = hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
+      atariData=hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
     }
-    if (images.kaisi) {
+    if(images.kaisi){
       hitCtx.clearRect(0,0,hitCanvas.width,hitCanvas.height);
       hitCtx.drawImage(images.kaisi,0,0,hitCanvas.width,hitCanvas.height);
-      kaisiData = hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
+      kaisiData=hitCtx.getImageData(0,0,hitCanvas.width,hitCanvas.height);
       detectStartCandidate();
     }
 
     setupLeversUI();
   }
 
-  function isBlackPixel(imgData,x,y) {
-    if (!imgData) return false;
-    const ix = Math.floor(x);
-    const iy = Math.floor(y);
-    if (ix < 0 || iy < 0 || ix >= imgData.width || iy >= imgData.height) return false;
-    const idx = (iy * imgData.width + ix) * 4;
-    const r = imgData.data[idx];
-    const g = imgData.data[idx+1];
-    const b = imgData.data[idx+2];
-    const a = imgData.data[idx+3];
-    if (a < 20) return false;
-    const th = 40;
-    return (r < th && g < th && b < th);
+  function isBlackPixel(imgData,x,y){
+    if(!imgData) return false;
+    const ix=Math.floor(x), iy=Math.floor(y);
+    if(ix<0||iy<0||ix>=imgData.width||iy>=imgData.height) return false;
+    const idx=(iy*imgData.width+ix)*4;
+    const r=imgData.data[idx], g=imgData.data[idx+1], b=imgData.data[idx+2], a=imgData.data[idx+3];
+    if(a<20) return false;
+    const th=40;
+    return (r<th && g<th && b<th);
   }
 
-  // 10円玉（表示と当たり判定はこの円）
-  const coin = {
-    x: canvas.width/2,
-    y: canvas.height/2,
-    vx: 0,
-    vy: 0,
-    r: 8,  // 小さめ
-    inPlay: false,
-    cleared: false,
-    failed: false,
-    angle: 0, // 回転角
-  };
+  const coin={ x:canvas.width/2, y:canvas.height/2, vx:0,vy:0,r:8,inPlay:false,cleared:false,failed:false,angle:0 };
+  let startCandidates=[];
 
-  let startCandidates = []; // kaisi 黒ピクセル一覧
-
-  function detectStartCandidate() {
-    if (!kaisiData) return;
-    const w = kaisiData.width;
-    const h = kaisiData.height;
-    startCandidates = [];
-    for (let y=0; y<h; y++) {
-      for (let x=0; x<w; x++) {
-        if (isBlackPixel(kaisiData,x,y)) {
-          startCandidates.push({x,y});
-        }
+  function detectStartCandidate(){
+    if(!kaisiData) return;
+    const w=kaisiData.width,h=kaisiData.height;
+    startCandidates=[];
+    for(let y=0;y<h;y++){
+      for(let x=0;x<w;x++){
+        if(isBlackPixel(kaisiData,x,y)) startCandidates.push({x,y});
       }
     }
-    if (startCandidates.length === 0) {
-      startCandidates.push({x:w/2,y:h/2});
-    }
+    if(!startCandidates.length) startCandidates.push({x:w/2,y:h/2});
   }
 
-  function spawnCoinAtSafeStart() {
-    // kaisi 黒の中からランダムに取り、そこから少し下探索して「ren と被らない」場所を探す
-    if (startCandidates.length === 0) {
-      coin.x = canvas.width/2;
-      coin.y = canvas.height/2;
-    } else {
-      const cand = startCandidates[Math.floor(Math.random()*startCandidates.length)];
-      let sx = cand.x;
-      let sy = cand.y;
-
-      // 下方向に少しスキャンして「壁が無い」位置を探す
-      for (let dy=0; dy<20; dy++) {
-        const tx = sx;
-        const ty = sy + dy;
-        // 円の外周8点が ren 黒と当たらないかチェック
-        let ok = true;
-        for (let i=0;i<8;i++){
-          const ang = Math.PI*2*i/8;
-          const ex = tx + Math.cos(ang)*coin.r;
-          const ey = ty + Math.sin(ang)*coin.r;
-          if (renData && isBlackPixel(renData,ex,ey)) {
-            ok = false;
-            break;
-          }
+  function spawnCoinAtSafeStart(){
+    if(!startCandidates.length){
+      coin.x=canvas.width/2; coin.y=canvas.height/2;
+    }else{
+      const cand=startCandidates[Math.floor(Math.random()*startCandidates.length)];
+      let sx=cand.x, sy=cand.y;
+      for(let dy=0;dy<20;dy++){
+        const tx=sx, ty=sy+dy;
+        let ok=true;
+        for(let i=0;i<8;i++){
+          const ang=Math.PI*2*i/8;
+          const ex=tx+Math.cos(ang)*coin.r;
+          const ey=ty+Math.sin(ang)*coin.r;
+          if(renData && isBlackPixel(renData,ex,ey)){ ok=false; break; }
         }
-        if (ok) {
-          sx = tx;
-          sy = ty;
-          break;
-        }
+        if(ok){ sx=tx; sy=ty; break; }
       }
-      coin.x = sx;
-      coin.y = sy;
+      coin.x=sx; coin.y=sy;
     }
-    coin.vx = 0;
-    coin.vy = 0;
-    coin.inPlay = true;
-    coin.cleared = false;
-    coin.failed = false;
-    coin.angle = 0;
+    coin.vx=0; coin.vy=0; coin.inPlay=true; coin.cleared=false; coin.failed=false; coin.angle=0;
   }
 
-  function resetCoin() {
-    coin.inPlay = false;
-    coin.cleared = false;
-    coin.failed = false;
-  }
+  function resetCoin(){ coin.inPlay=false; coin.cleared=false; coin.failed=false; }
 
-  // 重力など（1.5倍くらい強め）
-  const gravity = 0.7;   // px/frame^2
-  const friction = 0.012;
-  const bounce = 0.25;
+  const gravity=0.7, friction=0.012, bounce=0.25;
 
-  function updatePhysics() {
-    if (!coin.inPlay) return;
-    if (coin.cleared || coin.failed) return;
+  function updatePhysics(){
+    if(!coin.inPlay || coin.cleared || coin.failed) return;
 
-    // 重力（常に下）
     coin.vy += gravity;
+    coin.vx *= (1-friction);
+    coin.vy *= (1-friction);
 
-    // 空気抵抗
-    coin.vx *= (1 - friction);
-    coin.vy *= (1 - friction);
+    let nextX=coin.x+coin.vx, nextY=coin.y+coin.vy;
 
-    let nextX = coin.x + coin.vx;
-    let nextY = coin.y + coin.vy;
-
-    // レーン：斜面に沿って転がす（壁を貫通させない）
-    if (renData) {
-      const sampleCount = 12;
-      let hitCount = 0;
-      let nxSum = 0;
-      let nySum = 0;
-
-      for (let i=0;i<sampleCount;i++){
-        const ang = Math.PI*2*i/sampleCount;
-        const sx = nextX + Math.cos(ang)*coin.r;
-        const sy = nextY + Math.sin(ang)*coin.r;
-        if (isBlackPixel(renData,sx,sy)){
-          const nx = Math.cos(ang);
-          const ny = Math.sin(ang);
-          nxSum += nx;
-          nySum += ny;
+    if(renData){
+      const sampleCount=12;
+      let hitCount=0, nxSum=0, nySum=0;
+      for(let i=0;i<sampleCount;i++){
+        const ang=Math.PI*2*i/sampleCount;
+        const sx=nextX+Math.cos(ang)*coin.r;
+        const sy=nextY+Math.sin(ang)*coin.r;
+        if(isBlackPixel(renData,sx,sy)){
+          nxSum+=Math.cos(ang);
+          nySum+=Math.sin(ang);
           hitCount++;
         }
       }
-
-      if (hitCount>0){
-        // 平均法線
-        let nx = nxSum/hitCount;
-        let ny = nySum/hitCount;
-        const nLen = Math.sqrt(nx*nx+ny*ny) || 1;
-        nx/=nLen; ny/=nLen;
-
-        // 速度を法線・接線分解
-        const vDotN = coin.vx*nx + coin.vy*ny;
-        const vnX = vDotN*nx;
-        const vnY = vDotN*ny;
-        const vtX = coin.vx - vnX;
-        const vtY = coin.vy - vnY;
-
-        // 壁の中にめり込まないよう、法線成分をつぶして接線方向だけ残す＋ほんの少しバウンド
+      if(hitCount){
+        let nx=nxSum/hitCount, ny=nySum/hitCount;
+        const len=Math.sqrt(nx*nx+ny*ny)||1;
+        nx/=len; ny/=len;
+        const vDotN=coin.vx*nx+coin.vy*ny;
+        const vnX=vDotN*nx, vnY=vDotN*ny;
+        const vtX=coin.vx-vnX, vtY=coin.vy-vnY;
         coin.vx = vtX - vnX*bounce*0.3;
         coin.vy = vtY - vnY*bounce*0.3;
-
-        nextX = coin.x + coin.vx;
-        nextY = coin.y + coin.vy;
+        nextX=coin.x+coin.vx;
+        nextY=coin.y+coin.vy;
       }
     }
 
-    coin.x = nextX;
-    coin.y = nextY;
+    coin.x=nextX; coin.y=nextY;
 
-    // 枠
-    if (coin.x-coin.r<0){ coin.x = coin.r; coin.vx*=-bounce; }
-    if (coin.x+coin.r>canvas.width){ coin.x = canvas.width-coin.r; coin.vx*=-bounce; }
-    if (coin.y-coin.r<0){ coin.y = coin.r; coin.vy*=-bounce; }
-    if (coin.y+coin.r>canvas.height){ coin.y = canvas.height-coin.r; coin.vy*=-bounce; }
+    if(coin.x-coin.r<0){ coin.x=coin.r; coin.vx*=-bounce; }
+    if(coin.x+coin.r>canvas.width){ coin.x=canvas.width-coin.r; coin.vx*=-bounce; }
+    if(coin.y-coin.r<0){ coin.y=coin.r; coin.vy*=-bounce; }
+    if(coin.y+coin.r>canvas.height){ coin.y=canvas.height-coin.r; coin.vy*=-bounce; }
 
-    // 失敗穴
-    if (anaData && isBlackPixel(anaData,coin.x,coin.y)){
-      coin.inPlay=false;
-      coin.failed=true;
-      infoMsgEl.textContent='失敗…。また挑戦してね。';
+    if(anaData && isBlackPixel(anaData,coin.x,coin.y)){
+      coin.inPlay=false; coin.failed=true; infoMsgEl.textContent='失敗…。また挑戦してね。';
     }
-    // 成功穴
-    if (atariData && !coin.failed && !coin.cleared && isBlackPixel(atariData,coin.x,coin.y)){
-      coin.inPlay=false;
-      coin.cleared=true;
-      infoMsgEl.textContent='SUCCESS！おめでとう！';
+    if(atariData && !coin.failed && !coin.cleared && isBlackPixel(atariData,coin.x,coin.y)){
+      coin.inPlay=false; coin.cleared=true; infoMsgEl.textContent='SUCCESS！おめでとう！';
     }
 
-    // 回転：速度に比例・上限あり（高速で回転しすぎないように）
-    const speed = Math.sqrt(coin.vx*coin.vx + coin.vy*coin.vy);
-    const maxSpin = 0.25; // rad/frame 上限
-    const spin = Math.min(maxSpin, speed*0.03);
+    const speed=Math.sqrt(coin.vx*coin.vx+coin.vy*coin.vy);
+    const maxSpin=0.25;
+    const spin=Math.min(maxSpin,speed*0.03);
     coin.angle += spin;
   }
 
-  // ==========================
-  // レバー UI（reba1 の近くに配置）
-  // ==========================
-  const leverStates = [];
-
-  function setupLeversUI() {
-    leverOverlay.innerHTML = '';
-    leverStates.length = 0;
-
-    const w = canvas.width;
-    const h = canvas.height;
-
-    // 左右3本ずつの位置（ここは map/reba1 に合わせて後で微調整してOK）
-    const leverPositions = [
-      // 左側（x: 少し外寄り、y: 上中下）
-      { index: 0, side: 'left',  x: w*0.1, y: h*0.2 },
-      { index: 1, side: 'left',  x: w*0.1, y: h*0.5 },
-      { index: 2, side: 'left',  x: w*0.1, y: h*0.8 },
-      // 右側
-      { index: 3, side: 'right', x: w*0.9, y: h*0.2 },
-      { index: 4, side: 'right', x: w*0.9, y: h*0.5 },
-      { index: 5, side: 'right', x: w*0.9, y: h*0.8 },
+  // レバー UI
+  const leverStates=[];
+  function setupLeversUI(){
+    leverOverlay.innerHTML=''; leverStates.length=0;
+    const w=canvas.width,h=canvas.height;
+    const leverPos=[
+      { index:0, side:'left',  x:w*0.1,y:h*0.2 },
+      { index:1, side:'left',  x:w*0.1,y:h*0.5 },
+      { index:2, side:'left',  x:w*0.1,y:h*0.8 },
+      { index:3, side:'right', x:w*0.9,y:h*0.2 },
+      { index:4, side:'right', x:w*0.9,y:h*0.5 },
+      { index:5, side:'right', x:w*0.9,y:h*0.8 },
     ];
+    leverPos.forEach(lp=>{
+      const ui=document.createElement('div');
+      ui.className='lever-ui';
+      ui.style.left=`${lp.x-18}px`;
+      ui.style.top =`${lp.y-18}px`;
 
-    leverPositions.forEach(lp => {
-      const ui = document.createElement('div');
-      ui.className = 'lever-ui';
-      ui.style.left = `${lp.x - 18}px`; // 画像中心合わせ（36px/2）
-      ui.style.top  = `${lp.y - 18}px`;
-
-      // レバー画像
-      const imgBox = document.createElement('div');
-      imgBox.className = 'lever-image';
-      if (images.reba1) {
-        imgBox.style.backgroundImage = `url(${images.reba1.src})`;
-        imgBox.style.backgroundSize = 'cover';
-        imgBox.style.backgroundPosition = 'center';
+      const imgBox=document.createElement('div');
+      imgBox.className='lever-image';
+      if(images.reba1){
+        imgBox.style.backgroundImage=`url(${images.reba1.src})`;
+        imgBox.style.backgroundSize='cover';
+        imgBox.style.backgroundPosition='center';
       }
-
-      const stick = document.createElement('div');
-      stick.className = 'lever-stick';
+      const stick=document.createElement('div');
+      stick.className='lever-stick';
       imgBox.appendChild(stick);
 
-      // スライダー（横に出す）
-      const slider = document.createElement('input');
-      slider.type = 'range';
-      slider.min = '0';
-      slider.max = '100';
-      slider.step = '1';
-      slider.value = '0';
-      slider.className = 'lever-slider';
+      const slider=document.createElement('input');
+      slider.type='range'; slider.min='0'; slider.max='100';
+      slider.step='1'; slider.value='0'; slider.className='lever-slider';
 
-      const label = document.createElement('span');
-      label.className = 'lever-label';
-      label.textContent = lp.side === 'left' ? `L${lp.index+1}` : `R${lp.index-2}`;
+      const label=document.createElement('span');
+      label.className='lever-label';
+      label.textContent=(lp.side==='left')?`L${lp.index+1}`:`R${lp.index-2}`;
 
-      // 左レバーは右側にスライダー、右レバーは左側にスライダー
-      if (lp.side === 'left') {
-        ui.appendChild(imgBox);
-        ui.appendChild(slider);
-        ui.appendChild(label);
-      } else {
-        ui.appendChild(label);
-        ui.appendChild(slider);
-        ui.appendChild(imgBox);
-      }
+      if(lp.side==='left'){ ui.appendChild(imgBox); ui.appendChild(slider); ui.appendChild(label); }
+      else { ui.appendChild(label); ui.appendChild(slider); ui.appendChild(imgBox); }
 
       leverOverlay.appendChild(ui);
 
-      const lever = { ...lp, slider, stick, value: 0 };
+      const lever={...lp,slider,stick,value:0};
       leverStates.push(lever);
 
-      let prev = 0;
-
-      slider.addEventListener('input', () => {
-        if (calcState() !== 'C') {
-          slider.value = '0';
-          return;
+      let prev=0;
+      slider.addEventListener('input',()=>{
+        if(calcState()!=='C'){ slider.value='0'; return; }
+        const v=Number(slider.value);
+        lever.value=v;
+        const ang=-90*(v/100);
+        lever.stick.style.transform=`translate(-50%, 0) rotate(${ang}deg)`;
+        if(prev>20 && v<5){
+          const power=prev/100;
+          fireLever(lever,power);
         }
-
-        // 「重く感じる」＝ 値が高くなるほど入力を鈍くする：ここでは感覚的な演出は難しいので、
-        // 代わりに「高い値は一気に動きづらい」ようにクリッピングする手もあるが、
-        // まずはシンプルに値→角度＆パワーとして扱う。
-
-        const v = Number(slider.value);
-        lever.value = v;
-
-        const angle = -90 * (v/100);
-        lever.stick.style.transform = `translate(-50%, 0) rotate(${angle}deg)`;
-
-        // 引いてから離す（v が急に小さくなった）のを検知
-        if (prev > 20 && v < 5) {
-          const power = prev / 100;
-          fireLever(lever, power);
-        }
-
-        prev = v;
+        prev=v;
         touchAction();
       });
     });
   }
 
-  function fireLever(lever, power) {
-    if (!coin.inPlay || coin.cleared || coin.failed) return;
+  function fireLever(lever,power){
+    if(!coin.inPlay||coin.cleared||coin.failed) return;
+    const w=canvas.width,h=canvas.height;
+    const colW=w/3,rowH=h/3;
+    const rowIndex=(lever.side==='left')?lever.index:lever.index-3;
+    const colIndex=(lever.side==='left')?0:2;
+    const colXMin=colW*colIndex,colXMax=colXMin+colW;
+    const rowYMin=rowH*rowIndex,rowYMax=rowYMin+rowH;
 
-    const w = canvas.width;
-    const h = canvas.height;
+    const inArea=(coin.x>=colXMin&&coin.x<=colXMax&&coin.y>=rowYMin&&coin.y<=rowYMax);
+    if(!inArea) return;
 
-    const colWidth = w / 3;
-    const rowHeight = h / 3;
-    const side = lever.side;
+    const dirX=(lever.side==='left')?1:-1;
+    const baseSpeed=12;
+    const speed=baseSpeed*power;
 
-    // index 0,1,2 (left) / 3,4,5 (right)
-    const rowIndex = side === 'left' ? lever.index : lever.index - 3;
-    const colIndex = side === 'left' ? 0 : 2;
+    coin.vx += dirX*speed;
+    coin.vy -= speed*0.5;
+    infoMsgEl.textContent = `${lever.side==='left'?'左':'右'}レバーから発射！`;
 
-    const colXMin = colWidth * colIndex;
-    const colXMax = colXMin + colWidth;
-    const rowYMin = rowHeight * rowIndex;
-    const rowYMax = rowYMin + rowHeight;
-
-    const inArea =
-      coin.x >= colXMin && coin.x <= colXMax &&
-      coin.y >= rowYMin && coin.y <= rowYMax;
-
-    if (!inArea) return; // 空振り
-
-    // 打ち出す方向：レバー→盤面の内側（左右反対）
-    const dirX = (side === 'left') ? 1 : -1;
-    const baseSpeed = 12;          // 前回より約1.5倍強め
-    const speed = baseSpeed * power;
-
-    coin.vx += dirX * speed;
-    coin.vy -= speed * 0.5;
-
-    infoMsgEl.textContent = `${side === 'left' ? '左' : '右'}レバーから発射！`;
-
-    // バネのように元の位置へ
-    lever.slider.value = '0';
-    lever.value = 0;
-    lever.stick.style.transform = 'translate(-50%, 0) rotate(0deg)';
+    lever.slider.value='0';
+    lever.value=0;
+    lever.stick.style.transform='translate(-50%, 0) rotate(0deg)';
   }
 
-  // ==========================
-  // 描画
-  // ==========================
-  function drawGame() {
-    if (images.map) {
+  // 描画（ここで ren を可視化）
+  function drawGame(){
+    // 背景
+    if(images.map){
       ctx.drawImage(images.map,0,0,canvas.width,canvas.height);
     } else {
       ctx.fillStyle='#222';
       ctx.fillRect(0,0,canvas.width,canvas.height);
     }
 
-    if (coin.inPlay || coin.cleared || coin.failed) {
+    // ★ デバッグ表示：ren（レーン判定）を半透明で重ねる
+    if(images.ren){
+      ctx.save();
+      ctx.globalAlpha = 0.4;        // 透明度
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.drawImage(images.ren,0,0,canvas.width,canvas.height);
+      ctx.restore();
+    }
+
+    // 10円
+    if(coin.inPlay||coin.cleared||coin.failed){
       ctx.save();
       ctx.translate(coin.x,coin.y);
       ctx.rotate(coin.angle);
-
-      const grad = ctx.createRadialGradient(0,0,coin.r*0.2,0,0,coin.r);
+      const grad=ctx.createRadialGradient(0,0,coin.r*0.2,0,0,coin.r);
       grad.addColorStop(0,'#ffe8a0');
       grad.addColorStop(1,'#c08a2a');
-      ctx.fillStyle = grad;
+      ctx.fillStyle=grad;
       ctx.beginPath();
       ctx.arc(0,0,coin.r,0,Math.PI*2);
       ctx.fill();
-
-      ctx.fillStyle = '#5b3a10';
-      ctx.font = 'bold 8px system-ui';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.fillStyle='#5b3a10';
+      ctx.font='bold 8px system-ui';
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
       ctx.fillText('10',0,0);
-
       ctx.restore();
     }
   }
 
-  function gameLoop(){
-    requestAnimationFrame(gameLoop);
-    updatePhysics();
-    drawGame();
-  }
+  function gameLoop(){ requestAnimationFrame(gameLoop); updatePhysics(); drawGame(); }
 
-  // ==========================
   // じゃんけん（仮）
-  // ==========================
-  const jankenDummyBtn = document.getElementById('jankenDummyBtn');
-  const jankenResult = document.getElementById('jankenResult');
-  jankenDummyBtn.addEventListener('click', () => {
-    const hands = ['グー','チョキ','パー'];
-    const my = hands[Math.floor(Math.random()*3)];
-    const cpu = hands[Math.floor(Math.random()*3)];
+  const jankenDummyBtn=document.getElementById('jankenDummyBtn');
+  const jankenResult=document.getElementById('jankenResult');
+  jankenDummyBtn.addEventListener('click',()=>{
+    const hands=['グー','チョキ','パー'];
+    const my=hands[Math.floor(Math.random()*3)];
+    const cpu=hands[Math.floor(Math.random()*3)];
     let res;
-    if (my===cpu) res='あいこ';
+    if(my===cpu) res='あいこ';
     else if(
-      (my==='グー' && cpu==='チョキ') ||
-      (my==='チョキ' && cpu==='パー') ||
-      (my==='パー' && cpu==='グー')
-    ) res='あなたの勝ち';
-    else res='あなたの負け';
-    jankenResult.textContent = `あなた：${my} / CPU：${cpu} → ${res}`;
+      (my==='グー'&&cpu==='チョキ') ||
+      (my==='チョキ'&&cpu==='パー') ||
+      (my==='パー'&&cpu==='グー')
+    ) res='あなたの勝ち'; else res='あなたの負け';
+    jankenResult.textContent=`あなた：${my} / CPU：${cpu} → ${res}`;
   });
 
-  // ==========================
   // 初期化
-  // ==========================
-  loadAssets().then(() => {
+  loadAssets().then(()=>{
     spawnCoinAtSafeStart();
     gameLoop();
   });
