@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <title>10円ゲーム ハイブリッドUI版（クリック配置対応）</title>
+  <meta charset="UTF-8">
+  <title>10円 vs 坂1本 物理テスト</title>
   <style>
     body {
       margin: 0;
@@ -10,729 +10,262 @@
       color: #eee;
       font-family: sans-serif;
       display: flex;
-      flex-direction: row;
-      height: 100vh;
-      overflow: hidden;
-    }
-
-    /* 左側：UI パネル */
-    #uiPanel {
-      width: 260px;
-      background: #111;
-      border-right: 1px solid #333;
-      padding: 8px;
-      box-sizing: border-box;
-      display: flex;
       flex-direction: column;
-      gap: 8px;
+      align-items: center;
+      padding: 8px;
+    }
+    #info {
       font-size: 12px;
-      overflow-y: auto;
+      margin-bottom: 4px;
     }
-
-    #world {
-      flex: 1;
+    #canvasWrapper {
       position: relative;
-    }
-    #world canvas {
-      display: block;
-      background-size: contain;
-      background-repeat: no-repeat;
-      background-position: center center;
-    }
-
-    /* レバー UI */
-    #leverArea {
-      position: relative;
-      width: 180px;
-      height: 140px;
-      margin: 0 auto;
-      border: 1px solid #444;
-      background: #181818;
-      border-radius: 4px;
-      touch-action: none;
-    }
-    #lever {
-      position: absolute;
-      width: 12px;
-      height: 80px;
-      background: #ccc;
-      left: 50%;
-      bottom: 15px;
-      transform-origin: 50% 100%;
-      transform: translateX(-50%) rotate(0deg);
-      cursor: grab;
-    }
-    #lever:active {
-      cursor: grabbing;
-    }
-    #lever::after {
-      content: "";
-      position: absolute;
-      width: 30px;
-      height: 12px;
-      background: #ccc;
-      left: 50%;
-      top: 0;
-      transform: translateX(-50%);
-    }
-    #leverLabel {
-      position: absolute;
-      left: 4px;
-      bottom: 4px;
-      font-size: 10px;
-      color: #aaa;
-    }
-
-    button {
-      font-size: 11px;
-      padding: 3px 6px;
-      background: #333;
-      color: #eee;
       border: 1px solid #555;
-      border-radius: 3px;
-      cursor: pointer;
-      margin: 1px 0;
-    }
-    button:hover {
-      background: #444;
-    }
-    input[type="number"],
-    input[type="password"],
-    input[type="text"] {
-      width: 90px;
-      background: #222;
-      border: 1px solid #555;
-      color: #eee;
-      padding: 2px 4px;
-      border-radius: 3px;
-      margin: 1px 0;
-      font-size: 11px;
-    }
-
-    .label-small {
-      font-size: 11px;
-      color: #ccc;
-    }
-
-    #angleText, #powerText {
-      font-size: 11px;
-      color: #ccc;
-    }
-
-    input[type="range"] {
-      width: 100%;
-    }
-    .range-label-inline {
-      font-size: 11px;
-      margin-left: 4px;
-      color: #ccc;
-    }
-
-    /* 右側キャンバスのズーム（表示だけ拡大） */
-    #gameCanvas {
-      width: 110%;      /* ズーム倍率 */
-      height: auto;
-      transform: translateX(-5%);
       background: #000;
     }
-
-    /* 上部にプレイヤー名や状態を表示するバー */
-    #statusBar {
-      font-size: 11px;
-      padding: 4px;
-      border: 1px solid #444;
-      border-radius: 4px;
-      background: #181818;
-    }
-
-    .hint-text {
-      font-size: 11px;
-      color: #aaa;
+    #controlPanel {
+      font-size: 12px;
+      margin-top: 8px;
     }
   </style>
 </head>
 <body>
-  <!-- 左：UI パネル -->
-  <div id="uiPanel">
-    <div id="statusBar">
-      <div>PLAYING：<span id="playingName">Player</span></div>
-      <div>状態：<span id="stateLabel">ローカル練習モード</span></div>
-    </div>
-
-    <div style="margin-top:8px;">
-      <span class="label-small">プレイヤー名</span><br>
-      <input id="playerNameInput" type="text" placeholder="未入力なら『Player』">
-      <button id="decideNameBtn">決定</button>
-    </div>
-
-    <!-- レバー UI -->
-    <div style="margin-top:8px;">
-      <div class="label-small">レバー（L1 テスト）</div>
-      <div id="leverArea">
-        <div id="lever"></div>
-        <div id="leverLabel">レバー L1</div>
-      </div>
-      <div>
-        角度: <span id="angleText">0</span>° /
-        引き具合: <span id="powerText">0.00</span>
-      </div>
-      <div style="margin-top:4px;">
-        <span class="label-small">レバー設定</span><br>
-        打ち出し方向(度):
-        <input id="leverAngleDegInput" type="number" step="5" value="-45"><br>
-        打ち出し最大速度:
-        <input id="leverPowerMaxInput" type="number" step="5" value="30"><br>
-        <button id="leverPlaceModeBtn">レバー配置モード: OFF</button>
-        <div class="hint-text">
-          レバー配置モード ON 中にキャンバスをクリックすると、<br>
-          その位置が L1 レバーの基準位置になります。
-        </div>
-      </div>
-    </div>
-
-    <!-- 世界設定 -->
-    <div style="margin-top:8px;">
-      <span class="label-small">世界設定（テスト用）</span><br>
-      重力:
-      <input id="gravity" type="number" step="0.1" value="1.0"><br>
-      <button id="spawnCoin">10円 追加</button>
-      <button id="resetCoins">10円 全リセット</button><br>
-      <button id="resetSpawnToCenter">スポーンを中央付近に戻す</button>
-      <div class="hint-text">
-        キャンバスをクリックすると、その場所が「10円スポーン位置」になります。<br>
-        緑の丸も一緒に移動します。
-      </div>
-    </div>
-
-    <!-- 棒（斜面）編集 -->
-    <div style="margin-top:8px;">
-      <span class="label-small">棒編集（斜面テスト用）</span><br>
-      <button id="toggleStickEdit">棒編集モード: OFF</button><br>
-      棒の太さ:
-      <input id="stickThickness" type="range" min="5" max="50" value="20">
-      <span id="stickThicknessLabel" class="range-label-inline">20</span> px<br>
-      <button id="resetSticks">棒 全リセット</button>
-      <div class="hint-text">
-        棒編集モード中にキャンバス上で2点クリックすると、<br>
-        その2点を結ぶ棒が作られます。
-      </div>
-    </div>
+  <div id="info">
+    左クリック2回で坂の始点・終点を指定 → 「10円リセット」で坂の上に乗せる → 再生<br>
+    坂の角度に応じて自然に転がり、緩ければ止まるように調整済み。
+  </div>
+  <div id="canvasWrapper">
+    <canvas id="gameCanvas" width="600" height="400"></canvas>
+  </div>
+  <div id="controlPanel">
+    重力: <input id="gravityInput" type="number" step="0.1" value="0.5">
+    摩擦: <input id="frictionInput" type="number" step="0.01" value="0.02">
+    静止閾値: <input id="staticInput" type="number" step="0.01" value="0.02">
+    <button id="resetCoinBtn">10円リセット</button>
+    <button id="playPauseBtn">一時停止</button>
   </div>
 
-  <!-- 右：ゲーム世界 -->
-  <div id="world"></div>
-
-  <!-- Matter.js -->
-  <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
   <script>
-    // ============================================================
-    // 定数
-    // ============================================================
-    const MAP_IMAGE_URL = "https://raw.githubusercontent.com/yumemiru28000/10en-game/main/map.png";
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const gravityInput = document.getElementById("gravityInput");
+    const frictionInput = document.getElementById("frictionInput");
+    const staticInput = document.getElementById("staticInput");
+    const resetCoinBtn = document.getElementById("resetCoinBtn");
+    const playPauseBtn = document.getElementById("playPauseBtn");
 
-    const REBA_HEAVINESS_EXPONENT = 3.0;
-    const REBA_MAX_ANGLE_DEG      = 90;
-    const REBA_DRAG_SENSITIVITY   = 0.5;
+    let GRAVITY = parseFloat(gravityInput.value) || 0.5; // 下向き重力（px/frame^2）
+    let SLOPE_FRICTION = parseFloat(frictionInput.value) || 0.02; // 坂上摩擦（動摩擦）
+    let STATIC_THRESHOLD = parseFloat(staticInput.value) || 0.02; // 静止摩擦閾値（加速度）
 
-    const COIN_RADIUS = 11;
-    const COIN_MASS   = 0.0055;
-    const COIN_RESTITUTION    = 0.3;
-    const COIN_FRICTION       = 0.05;
-    const COIN_FRICTION_STATIC= 0.1;
-    const COIN_FRICTION_AIR   = 0.001;
-
-    const SLOPE_EXTRA_FORCE_SCALE = 0.002;
-
-    // ============================================================
-    // Matter.js 初期化
-    // ============================================================
-    const {
-      Engine, Render, Runner, Bodies, Body, Composite,
-      Mouse, MouseConstraint, Events
-    } = Matter;
-
-    const engine = Engine.create();
-    const world  = engine.world;
-    engine.world.gravity.y = 1.0;
-
-    const canvasWidth  = window.innerWidth - 260;
-    const canvasHeight = window.innerHeight;
-
-    const render = Render.create({
-      element: document.getElementById("world"),
-      engine: engine,
-      options: {
-        width: canvasWidth,
-        height: canvasHeight,
-        wireframes: false,
-        background: "#000"
-      }
+    gravityInput.addEventListener("input", () => {
+      GRAVITY = parseFloat(gravityInput.value) || GRAVITY;
     });
-    Render.run(render);
-    const runner = Runner.create();
-    Runner.run(runner, engine);
-
-    // 背景に map.png
-    render.canvas.id = "gameCanvas";
-    render.canvas.style.backgroundImage = `url("${MAP_IMAGE_URL}")`;
-    render.canvas.style.backgroundSize = "contain";
-    render.canvas.style.backgroundRepeat = "no-repeat";
-    render.canvas.style.backgroundPosition = "center center";
-
-    // ============================================================
-    // UI 要素
-    // ============================================================
-    const playingNameEl  = document.getElementById("playingName");
-    const stateLabelEl   = document.getElementById("stateLabel");
-    const nameInput      = document.getElementById("playerNameInput");
-    const decideNameBtn  = document.getElementById("decideNameBtn");
-
-    const leverEl        = document.getElementById("lever");
-    const angleTextEl    = document.getElementById("angleText");
-    const powerTextEl    = document.getElementById("powerText");
-    const gravityInput   = document.getElementById("gravity");
-    const spawnCoinBtn   = document.getElementById("spawnCoin");
-    const resetCoinsBtn  = document.getElementById("resetCoins");
-    const leverAngleDegInput = document.getElementById("leverAngleDegInput");
-    const leverPowerMaxInput = document.getElementById("leverPowerMaxInput");
-    const resetSpawnToCenterBtn = document.getElementById("resetSpawnToCenter");
-    const toggleStickEditBtn = document.getElementById("toggleStickEdit");
-    const resetSticksBtn     = document.getElementById("resetSticks");
-    const stickThicknessInput= document.getElementById("stickThickness");
-    const stickThicknessLabel= document.getElementById("stickThicknessLabel");
-    const leverPlaceModeBtn  = document.getElementById("leverPlaceModeBtn");
-
-    // 名前
-    let myName = localStorage.getItem("10yen_name") || "Player";
-    playingNameEl.textContent = myName;
-    decideNameBtn.addEventListener("click", () => {
-      const v = nameInput.value.trim();
-      myName = v || "Player";
-      playingNameEl.textContent = myName;
-      localStorage.setItem("10yen_name", myName);
-      stateLabelEl.textContent = "ローカル練習モード";
+    frictionInput.addEventListener("input", () => {
+      SLOPE_FRICTION = parseFloat(frictionInput.value) || SLOPE_FRICTION;
+    });
+    staticInput.addEventListener("input", () => {
+      STATIC_THRESHOLD = parseFloat(staticInput.value) || STATIC_THRESHOLD;
     });
 
-    // ============================================================
-    // 物理オブジェクト基盤
-    // ============================================================
-    let worldInitialized = false;
-    let leftWall, rightWall, ceiling, slopedFloor, cornerPost, gentleSlope;
-    const stickBodies = [];
-    const coins = [];
+    const coin = {
+      x: canvas.width/2,
+      y: 50,
+      vx: 0,
+      vy: 0,
+      r: 12
+    };
 
-    // スポーン位置 & ハンドル
-    let spawnPos = { x: canvasWidth * 0.3, y: canvasHeight * 0.4 };
-    let spawnHandleBody = null;
-    const SPAWN_HANDLE_RADIUS = 14;
+    // 坂1本（線分）
+    let slope = {
+      hasSlope: false,
+      x1: 100, y1: 300,
+      x2: 500, y2: 250
+    };
 
-    function createCoin(x, y) {
-      return Bodies.circle(x, y, COIN_RADIUS, {
-        mass: COIN_MASS,
-        restitution: COIN_RESTITUTION,
-        friction: COIN_FRICTION,
-        frictionStatic: COIN_FRICTION_STATIC,
-        frictionAir: COIN_FRICTION_AIR,
-        render: {
-          fillStyle: "#cc8844",
-          strokeStyle: "#ddbb77",
-          lineWidth: 2
-        }
-      });
-    }
-
-    function addCoinAt(x, y) {
-      const c = createCoin(x, y);
-      coins.push(c);
-      Composite.add(world, c);
-      return c;
-    }
-
-    function resetCoins() {
-      for (const c of coins) Composite.remove(world, c);
-      coins.length = 0;
-      addCoinAt(spawnPos.x, spawnPos.y);
-    }
-
-    // レバー関連
-    let leverAngleDegSetting = parseFloat(leverAngleDegInput.value) || -45;
-    let leverPowerMax        = parseFloat(leverPowerMaxInput.value) || 30;
-    leverAngleDegInput.addEventListener("input", () => {
-      leverAngleDegSetting = parseFloat(leverAngleDegInput.value) || leverAngleDegSetting;
-    });
-    leverPowerMaxInput.addEventListener("input", () => {
-      leverPowerMax = parseFloat(leverPowerMaxInput.value) || leverPowerMax;
-    });
-
-    let leverAngleDeg = 0;
-    let isDraggingLever = false;
-    let dragStartY = 0;
-    let dragStartAngle = 0;
-
-    // レバー位置設定（今は L1 だけ）
-    let leverPlaceMode = false;
-    const leverConfigs = [
-      { name: "L1", x: canvasWidth * 0.2, y: canvasHeight * 0.7 } // 初期位置
-    ];
-
-    function toggleLeverPlaceMode() {
-      leverPlaceMode = !leverPlaceMode;
-      leverPlaceModeBtn.textContent = "レバー配置モード: " + (leverPlaceMode ? "ON" : "OFF");
-    }
-    leverPlaceModeBtn.addEventListener("click", toggleLeverPlaceMode);
-
-    // Matter マウス
-    const mouse = Mouse.create(render.canvas);
-    const mouseConstraint = MouseConstraint.create(engine, {
-      mouse,
-      constraint: { stiffness: 0.2, render: { visible: false } }
-    });
-    Composite.add(world, mouseConstraint);
-    render.mouse = mouse;
-
-    let stickEditMode = false;
-    let pendingPoint = null;
-    let currentStickThickness = parseInt(stickThicknessInput.value, 10) || 20;
-    stickThicknessLabel.textContent = currentStickThickness;
-    stickThicknessInput.addEventListener("input", () => {
-      currentStickThickness = parseInt(stickThicknessInput.value, 10) || 20;
-      stickThicknessLabel.textContent = currentStickThickness;
-    });
-
-    // 静的ボディキャッシュ（斜面補助用）
-    let staticBodiesCache = null;
-
-    function initWorldObjectsOnce() {
-      if (worldInitialized) return;
-      worldInitialized = true;
-
-      // 壁
-      const thickness = 40;
-      leftWall = Bodies.rectangle(20, canvasHeight/2, thickness, canvasHeight, {
-        isStatic: true,
-        render: { fillStyle: "rgba(80,80,80,0.6)" }
-      });
-      rightWall = Bodies.rectangle(canvasWidth-20, canvasHeight/2, thickness, canvasHeight, {
-        isStatic: true,
-        render: { fillStyle: "rgba(80,80,80,0.6)" }
-      });
-      ceiling = Bodies.rectangle(canvasWidth/2, 20, canvasWidth, thickness, {
-        isStatic: true,
-        render: { fillStyle: "rgba(80,80,80,0.6)" }
-      });
-
-      // 斜面など（テスト用）
-      const bigFloorAngle = -Math.PI/8;
-      const bigFloorLength = 500;
-      slopedFloor = Bodies.rectangle(
-        canvasWidth - 260,
-        canvasHeight - 60,
-        bigFloorLength,
-        20,
-        {
-          isStatic: true,
-          angle: bigFloorAngle,
-          render: { fillStyle: "rgba(120,120,120,0.7)" }
-        }
-      );
-      cornerPost = Bodies.rectangle(
-        canvasWidth - 350,
-        canvasHeight - 150,
-        20,
-        80,
-        {
-          isStatic: true,
-          render: { fillStyle: "rgba(160,160,160,0.7)" }
-        }
-      );
-      gentleSlope = Bodies.rectangle(
-        canvasWidth/2,
-        canvasHeight/2,
-        350,
-        10,
-        {
-          isStatic: true,
-          angle: 0.02,
-          render: { fillStyle: "rgba(100,100,100,0.7)" }
-        }
-      );
-
-      Composite.add(world, [leftWall, rightWall, ceiling, slopedFloor, cornerPost, gentleSlope]);
-
-      // スポーンハンドル（緑の丸）
-      spawnHandleBody = Bodies.circle(spawnPos.x, spawnPos.y, SPAWN_HANDLE_RADIUS, {
-        isStatic: false,
-        isSensor: true,
-        render: {
-          fillStyle: "rgba(0,255,0,0.6)",
-          strokeStyle: "rgba(0,255,0,1)",
-          lineWidth: 1
-        }
-      });
-      Body.setInertia(spawnHandleBody, Infinity);
-      Composite.add(world, spawnHandleBody);
-
-      // 初期10円
-      addCoinAt(spawnPos.x, spawnPos.y);
-
-      // マウスイベント
-      setupMouseEvents();
-
-      // 静的ボディキャッシュ & 斜面補助
-      cacheStaticBodies();
-      Events.on(engine, "beforeUpdate", () => {
-        applySlopeForces();
-      });
-    }
-
-    initWorldObjectsOnce();
-
-    function cacheStaticBodies() {
-      staticBodiesCache = [];
-      Composite.allBodies(world).forEach(b => {
-        if (b.isStatic) staticBodiesCache.push(b);
-      });
-    }
-
-    function applySlopeForces() {
-      if (!staticBodiesCache) return;
-      for (const c of coins) {
-        const pos = c.position;
-        let bestBody = null;
-        let bestDist = Infinity;
-        for (const b of staticBodiesCache) {
-          const dx = b.position.x - pos.x;
-          const dy = b.position.y - pos.y;
-          const dist = Math.sqrt(dx*dx + dy*dy);
-          if (dist < 80 && dist < bestDist) {
-            bestDist = dist;
-            bestBody = b;
-          }
-        }
-        if (!bestBody) continue;
-
-        const angle = bestBody.angle || 0;
-        const normal = { x: -Math.sin(angle), y: -Math.cos(angle) };
-
-        const tangent1 = { x:  normal.y, y: -normal.x };
-        const tangent2 = { x: -normal.y, y:  normal.x };
-        const g = engine.world.gravity.y;
-        const t1DotG = tangent1.y * g;
-        const t2DotG = tangent2.y * g;
-        let slopeDir = t1DotG > t2DotG ? tangent1 : tangent2;
-
-        const down = { x: 0, y: 1 };
-        const len = Math.sqrt(slopeDir.x*slopeDir.x + slopeDir.y*slopeDir.y);
-        if (len === 0) continue;
-        const dot = (slopeDir.x*down.x + slopeDir.y*down.y) / len;
-        const tiltFactor = Math.max(0, Math.min(1, dot));
-        if (tiltFactor < 0.01) continue;
-
-        const forceMag = SLOPE_EXTRA_FORCE_SCALE * COIN_MASS * g * tiltFactor;
-        const fx = slopeDir.x * forceMag;
-        const fy = slopeDir.y * forceMag;
-        Body.applyForce(c, c.position, { x: fx, y: fy });
-      }
-    }
-
-    // ============================================================
-    // レバー挙動
-    // ============================================================
-    function calcPullPower() {
-      const normalized = leverAngleDeg / REBA_MAX_ANGLE_DEG;
-      return Math.pow(normalized, REBA_HEAVINESS_EXPONENT);
-    }
-
-    function updateLeverVisual() {
-      leverEl.style.transform = `translateX(-50%) rotate(${leverAngleDeg}deg)`;
-      angleTextEl.textContent = leverAngleDeg.toFixed(1);
-      powerTextEl.textContent = calcPullPower().toFixed(2);
-    }
-
-    function releaseLeverAndLaunch() {
-      const pull = calcPullPower();
-      const power = pull * leverPowerMax;
-      if (power <= 0.1) {
-        leverAngleDeg = 0;
-        updateLeverVisual();
-        return;
-      }
-      const rad = leverAngleDegSetting * Math.PI / 180;
-      const dir = { x: Math.cos(rad), y: Math.sin(rad) };
-
-      // L1 のレバー位置（円周半径以内にある10円だけ打つ）
-      const leverPos = { x: leverConfigs[0].x, y: leverConfigs[0].y };
-      const hitRadius = 50;
-
-      coins.forEach(c => {
-        const dx = c.position.x - leverPos.x;
-        const dy = c.position.y - leverPos.y;
-        if (dx*dx + dy*dy < hitRadius*hitRadius) {
-          Body.setVelocity(c, { x: dir.x * power, y: dir.y * power });
-        }
-      });
-
-      leverAngleDeg = 0;
-      updateLeverVisual();
-    }
-
-    function startDragLever(startY) {
-      isDraggingLever = true;
-      dragStartY = startY;
-      dragStartAngle = leverAngleDeg;
-    }
-    function moveDragLever(currentY) {
-      if (!isDraggingLever) return;
-      const dy = currentY - dragStartY;
-      let newAngle = dragStartAngle + dy * REBA_DRAG_SENSITIVITY;
-      newAngle = Math.max(0, Math.min(REBA_MAX_ANGLE_DEG, newAngle));
-      leverAngleDeg = newAngle;
-      updateLeverVisual();
-    }
-    function endDragLever() {
-      if (!isDraggingLever) return;
-      isDraggingLever = false;
-      releaseLeverAndLaunch();
-    }
-
-    // レバー用マウス/タッチ（UIパネル内）
-    leverEl.addEventListener("mousedown", e => {
-      e.preventDefault();
-      startDragLever(e.clientY);
-    });
-    window.addEventListener("mousemove", e => {
-      if (!isDraggingLever) return;
-      e.preventDefault();
-      moveDragLever(e.clientY);
-    });
-    window.addEventListener("mouseup", e => {
-      if (!isDraggingLever) return;
-      e.preventDefault();
-      endDragLever();
-    });
-
-    leverEl.addEventListener("touchstart", e => {
-      e.preventDefault();
-      const t = e.touches[0];
-      startDragLever(t.clientY);
-    }, { passive: false });
-    window.addEventListener("touchmove", e => {
-      if (!isDraggingLever) return;
-      e.preventDefault();
-      const t = e.touches[0];
-      moveDragLever(t.clientY);
-    }, { passive: false });
-    window.addEventListener("touchend", e => {
-      if (!isDraggingLever) return;
-      e.preventDefault();
-      endDragLever();
-    }, { passive: false });
-
-    updateLeverVisual();
-
-    // ============================================================
-    // キャンバス側のクリック処理（スポーン & レバー配置 & 棒）
-    // ============================================================
-    function setupMouseEvents() {
-      // spawnHandleBody は MouseConstraint でドラッグできるが、
-      // クリックでの変更もサポートする。
-      Events.on(mouseConstraint, "enddrag", event => {
-        const body = event.body;
-        if (body === spawnHandleBody) {
-          spawnPos.x = spawnHandleBody.position.x;
-          spawnPos.y = spawnHandleBody.position.y;
-        }
-      });
-
-      // キャンバスクリック（棒編集/レバー配置/スポーン）
-      render.canvas.addEventListener("click", e => {
-        const rect = render.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-
-        if (stickEditMode) {
-          // 棒編集モード中：2点クリックで棒を作る
-          handleStickEditClick(x, y);
-        } else if (leverPlaceMode) {
-          // レバー配置モード中：L1の位置をこの座標に設定
-          leverConfigs[0].x = x;
-          leverConfigs[0].y = y;
-          console.log("L1 レバー位置設定:", x, y);
-        } else {
-          // 通常モード：スポーン位置をこの座標に設定
-          spawnPos.x = x;
-          spawnPos.y = y;
-          if (spawnHandleBody) {
-            Body.setPosition(spawnHandleBody, spawnPos);
-          }
-          console.log("スポーン位置設定:", x, y);
-        }
-      });
-    }
-
-    function handleStickEditClick(x, y) {
-      if (!pendingPoint) {
-        pendingPoint = { x, y };
+    // クリックで坂の始点・終点を指定
+    let slopeClickStage = 0;
+    canvas.addEventListener("click", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      if (slopeClickStage === 0) {
+        slope.x1 = x; slope.y1 = y;
+        slopeClickStage = 1;
       } else {
-        const x1 = pendingPoint.x, y1 = pendingPoint.y;
-        const x2 = x, y2 = y;
-        const cx = (x1 + x2)/2;
-        const cy = (y1 + y2)/2;
-        const dx = x2 - x1, dy = y2 - y1;
-        const length = Math.sqrt(dx*dx + dy*dy);
-        const angle = Math.atan2(dy, dx);
-        const stick = Bodies.rectangle(
-          cx, cy, length, currentStickThickness,
-          {
-            isStatic: true,
-            angle,
-            render: { fillStyle: "rgba(200,200,200,0.9)" }
-          }
+        slope.x2 = x; slope.y2 = y;
+        slope.hasSlope = true;
+        slopeClickStage = 0;
+      }
+    });
+
+    // コインを坂の上にリセット
+    resetCoinBtn.addEventListener("click", () => {
+      if (!slope.hasSlope) {
+        coin.x = canvas.width/2;
+        coin.y = 50;
+      } else {
+        // 坂の中点に置く + 少し上にオフセット
+        const mx = (slope.x1 + slope.x2)/2;
+        const my = (slope.y1 + slope.y2)/2;
+        const dx = slope.x2 - slope.x1;
+        const dy = slope.y2 - slope.y1;
+        const len = Math.sqrt(dx*dx + dy*dy) || 1;
+        const nx = -(dy/len); // 法線（上向き寄り）
+        const ny =  (dx/len);
+        coin.x = mx + nx * coin.r;
+        coin.y = my + ny * coin.r;
+      }
+      coin.vx = 0;
+      coin.vy = 0;
+    });
+
+    let paused = false;
+    playPauseBtn.addEventListener("click", () => {
+      paused = !paused;
+      playPauseBtn.textContent = paused ? "再生" : "一時停止";
+    });
+
+    // 距離判定用：点 C と線分 AB の最近点 P と距離 d を返す
+    function closestPointOnSegment(ax, ay, bx, by, cx, cy) {
+      const abx = bx - ax;
+      const aby = by - ay;
+      const acx = cx - ax;
+      const acy = cy - ay;
+      const abLen2 = abx*abx + aby*aby || 1;
+      let t = (acx * abx + acy * aby) / abLen2;
+      t = Math.max(0, Math.min(1, t));
+      const px = ax + abx * t;
+      const py = ay + aby * t;
+      const dx = cx - px;
+      const dy = cy - py;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      return { px, py, d };
+    }
+
+    function updatePhysics() {
+      if (paused) return;
+
+      // 1. 重力で加速
+      coin.vy += GRAVITY;
+
+      // 2. 位置更新（まずは自由落下）
+      const prevX = coin.x;
+      const prevY = coin.y;
+      coin.x += coin.vx;
+      coin.y += coin.vy;
+
+      if (slope.hasSlope) {
+        // 3. 円 vs 坂線分 の距離を計���
+        const { px, py, d } = closestPointOnSegment(
+          slope.x1, slope.y1, slope.x2, slope.y2,
+          coin.x, coin.y
         );
-        Composite.add(world, stick);
-        stickBodies.push(stick);
-        pendingPoint = null;
-        cacheStaticBodies();
+
+        if (d < coin.r) {
+          // 衝突中：坂の法線と接線（単位ベクトル）を計算
+          const dx = slope.x2 - slope.x1;
+          const dy = slope.y2 - slope.y1;
+          const len = Math.sqrt(dx*dx + dy*dy) || 1;
+          const tx = dx / len;       // 接線（坂に沿う方向, 右向き）
+          const ty = dy / len;
+          const nx = -(ty);          // 法線（坂の外側：ここでは「上側」を想定）
+          const ny =  (tx);
+
+          // 円を坂の外側に押し出す（MTD）
+          const penetration = coin.r - d;
+          coin.x += nx * penetration;
+          coin.y += ny * penetration;
+
+          // 速度を接線/法線に分解
+          const vpx = coin.vx;
+          const vpy = coin.vy;
+          const v_parallel = vpx * tx + vpy * ty;  // 接線成分（スカラー）
+          let v_normal   = vpx * nx + vpy * ny;    // 法線成分（スカラー）
+
+          // 法線方向速度は坂が受け止める：0 に近づける
+          v_normal = 0;
+
+          // 接線方向の重力加速度 a_parallel = g・t
+          const g_parallel = GRAVITY * ty; // g=(0,GRAVITY) なので dot(g,t) = GRAVITY*ty
+          let new_v_parallel = v_parallel + g_parallel;
+
+          // 静止摩擦：加速度と速度が小さいなら止める
+          if (Math.abs(g_parallel) < STATIC_THRESHOLD && Math.abs(v_parallel) < STATIC_THRESHOLD) {
+            new_v_parallel = 0;
+          } else {
+            // 動摩擦：少し減衰
+            new_v_parallel *= (1 - SLOPE_FRICTION);
+          }
+
+          // 接線＋法線に戻す
+          coin.vx = new_v_parallel * tx + v_normal * nx;
+          coin.vy = new_v_parallel * ty + v_normal * ny;
+        }
+      }
+
+      // 4. 画面の枠でバウンド（テスト用）
+      const bounce = 0.3;
+      if (coin.x - coin.r < 0) {
+        coin.x = coin.r;
+        coin.vx *= -bounce;
+      }
+      if (coin.x + coin.r > canvas.width) {
+        coin.x = canvas.width - coin.r;
+        coin.vx *= -bounce;
+      }
+      if (coin.y - coin.r < 0) {
+        coin.y = coin.r;
+        coin.vy *= -bounce;
+      }
+      if (coin.y + coin.r > canvas.height) {
+        coin.y = canvas.height - coin.r;
+        coin.vy *= -bounce;
       }
     }
 
-    toggleStickEditBtn.addEventListener("click", () => {
-      stickEditMode = !stickEditMode;
-      toggleStickEditBtn.textContent = "棒編集モード: " + (stickEditMode ? "ON" : "OFF";
-      if (!stickEditMode) pendingPoint = null;
-    });
+    function draw() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
 
-    resetSticksBtn.addEventListener("click", () => {
-      for (const b of stickBodies) Composite.remove(world, b);
-      stickBodies.length = 0;
-      pendingPoint = null;
-      cacheStaticBodies();
-    });
-
-    // ============================================================
-    // UI ボタン
-    // ============================================================
-    gravityInput?.addEventListener("input", e => {
-      const g = parseFloat(e.target.value) || 0;
-      engine.world.gravity.y = g;
-    });
-
-    spawnCoinBtn?.addEventListener("click", () => {
-      addCoinAt(spawnPos.x, spawnPos.y);
-    });
-
-    resetCoinsBtn?.addEventListener("click", () => {
-      resetCoins();
-    });
-
-    resetSpawnToCenterBtn?.addEventListener("click", () => {
-      spawnPos.x = canvasWidth * 0.3;
-      spawnPos.y = canvasHeight * 0.4;
-      if (spawnHandleBody) {
-        Body.setPosition(spawnHandleBody, spawnPos);
+      // 坂
+      if (slope.hasSlope || slopeClickStage === 1) {
+        ctx.strokeStyle = "#44aaff";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(slope.x1, slope.y1);
+        ctx.lineTo(slope.x2, slope.y2);
+        ctx.stroke();
       }
-    });
 
+      // 円
+      ctx.save();
+      ctx.translate(coin.x, coin.y);
+      ctx.fillStyle = "#cc8844";
+      ctx.beginPath();
+      ctx.arc(0,0,coin.r,0,Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = "#5b3a10";
+      ctx.font = "bold 10px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("10",0,0);
+      ctx.restore();
+
+      // デバッグ用：速度ベクトル
+      ctx.strokeStyle = "#ff00ff";
+      ctx.beginPath();
+      ctx.moveTo(coin.x, coin.y);
+      ctx.lineTo(coin.x + coin.vx * 3, coin.y + coin.vy * 3);
+      ctx.stroke();
+    }
+
+    function loop() {
+      requestAnimationFrame(loop);
+      updatePhysics();
+      draw();
+    }
+
+    loop();
   </script>
 </body>
 </html>
