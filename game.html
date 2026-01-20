@@ -169,6 +169,9 @@
   const EDGE_THICKNESS = 5;  // Thickness of terrain segments
   const RDP_EPSILON = 2.0;   // Simplification tolerance for RDP
   const MIN_SEG_LEN = 2;     // Minimum segment length to create
+  const EDGE_CONNECT_TOLERANCE = 0.01;  // Distance tolerance for connecting edges
+  const LOOP_CLOSURE_DISTANCE = 2;      // Max distance to close a polyline loop
+  const LINE_DEGENERATE_EPSILON = 0.001; // Epsilon for degenerate line detection
 
   // --- Marching Squares: 輪郭抽出 ---
   // blackMask から境界の順序付きポリライン群を抽出
@@ -198,8 +201,8 @@
 
     // 全エッジを収集
     const edges = [];
-    for (let y = 0; y <= h; y++) {
-      for (let x = 0; x <= w; x++) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
         const c = getCase(x, y);
         const es = edgeTable[c] || [];
         for (const [dx0,dy0,dx1,dy1] of es) {
@@ -234,12 +237,12 @@
           const d0 = Math.hypot(last.x - e.x0, last.y - e.y0);
           const d1 = Math.hypot(last.x - e.x1, last.y - e.y1);
           
-          if (d0 < 0.01) {
+          if (d0 < EDGE_CONNECT_TOLERANCE) {
             poly.push({x: e.x1, y: e.y1});
             used[j] = 1;
             changed = true;
             break;
-          } else if (d1 < 0.01) {
+          } else if (d1 < EDGE_CONNECT_TOLERANCE) {
             poly.push({x: e.x0, y: e.y0});
             used[j] = 1;
             changed = true;
@@ -261,12 +264,12 @@
           const d0 = Math.hypot(first.x - e.x0, first.y - e.y0);
           const d1 = Math.hypot(first.x - e.x1, first.y - e.y1);
           
-          if (d0 < 0.01) {
+          if (d0 < EDGE_CONNECT_TOLERANCE) {
             poly.unshift({x: e.x1, y: e.y1});
             used[j] = 1;
             changed = true;
             break;
-          } else if (d1 < 0.01) {
+          } else if (d1 < EDGE_CONNECT_TOLERANCE) {
             poly.unshift({x: e.x0, y: e.y0});
             used[j] = 1;
             changed = true;
@@ -315,7 +318,7 @@
     const dx = lineEnd.x - lineStart.x;
     const dy = lineEnd.y - lineStart.y;
     const norm = Math.hypot(dx, dy);
-    if (norm < 0.001) return Math.hypot(point.x - lineStart.x, point.y - lineStart.y);
+    if (norm < LINE_DEGENERATE_EPSILON) return Math.hypot(point.x - lineStart.x, point.y - lineStart.y);
     
     const t = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / (norm * norm);
     const projX = lineStart.x + t * dx;
@@ -575,7 +578,7 @@
         const first = simplified[0];
         const last = simplified[simplified.length - 1];
         const dist = Math.hypot(last.x - first.x, last.y - first.y);
-        if (dist < 2) { // 始点と終点が近ければループを閉じる
+        if (dist < LOOP_CLOSURE_DISTANCE) { // 始点と終点が近ければループを閉じる
           const seg = { x1: last.x, y1: last.y, x2: first.x, y2: first.y };
           const b = segmentToBody(Matter, seg, EDGE_THICKNESS, {
             render: { fillStyle: "#222" }
