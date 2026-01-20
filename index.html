@@ -83,7 +83,6 @@
 
     .small { font-size: 12px; opacity: 0.8; }
 
-    /* 盤面＋左右のレバーUI */
     #gameOuter {
       display: flex;
       justify-content: center;
@@ -167,7 +166,7 @@
 
     .lever-slider {
       width: 70px;
-      pointer-events: none; /* ドラッグ専用にするのでクリックは効かない */
+      pointer-events: none; /* 操作は長押しドラッグのみ */
     }
 
     .lever-label {
@@ -188,7 +187,7 @@
     <h1 class="menu-title">ミニゲーム選択</h1>
     <div class="center">
       <button id="toNameInputBtn">10円ゲーム</button><br>
-      <button id="toJankenBtn">じゃんけ��ゲーム</button>
+      <button id="toJankenBtn">じゃんけんゲーム</button>
     </div>
   </div>
 </div>
@@ -331,7 +330,7 @@
     return 'B';
   }
 
-  const leverStates = []; // 定義だけ先に
+  const leverStates = [];
 
   function setLeverEnabled(flag) {
     leverStates.forEach(l => {
@@ -531,8 +530,8 @@
       for(let dy=0;dy<20;dy++){
         const tx=sx, ty=sy+dy;
         let ok=true;
-        for(let i=0;i<8;i++){
-          const ang=Math.PI*2*i/8;
+        for(let i=0;i<16;i++){
+          const ang=Math.PI*2*i/16;
           const ex=tx+Math.cos(ang)*coin.r;
           const ey=ty+Math.sin(ang)*coin.r;
           if(renData && isBlackPixel(renData,ex,ey)){ ok=false; break; }
@@ -548,50 +547,68 @@
 
   const gravity=0.7, friction=0.012, bounce=0.25;
 
-  // 壁との衝突を最優先で解決（めり込み防止）
+  // 「10円の縁」のリングが ren 黒と絶対重ならないように押し出す
   function resolveWallCollision(){
     if(!renData) return;
-    for(let iter=0;iter<3;iter++){ // 最大3回まで試す
-      const sampleCount=16;
-      let hitCount=0, nxSum=0, nySum=0;
+    const maxIter = 5;       // 1フレーム内で最大5回まで修正試行
+    const sampleCount = 24;  // 円周サンプル数（多いほど精度↑）
+
+    for(let iter=0; iter<maxIter; iter++){
+      let hitCount=0;
+      let nxSum=0, nySum=0;
+
       for(let i=0;i<sampleCount;i++){
-        const ang=Math.PI*2*i/sampleCount;
-        const sx=coin.x+Math.cos(ang)*coin.r;
-        const sy=coin.y+Math.sin(ang)*coin.r;
+        const ang = Math.PI*2*i/sampleCount;
+        const sx = coin.x + Math.cos(ang)*coin.r;
+        const sy = coin.y + Math.sin(ang)*coin.r;
         if(isBlackPixel(renData,sx,sy)){
-          nxSum+=Math.cos(ang);
-          nySum+=Math.sin(ang);
+          // 10円中心→このサンプル方向ベクトル = 「壁の外向き」法線の近似
+          nxSum += Math.cos(ang);
+          nySum += Math.sin(ang);
           hitCount++;
         }
       }
-      if(!hitCount) break;
-      let nx=nxSum/hitCount, ny=nySum/hitCount;
-      const len=Math.sqrt(nx*nx+ny*ny)||1;
-      nx/=len; ny/=len;
-      // 速度の法線成分を完全に殺す
-      const vDotN=coin.vx*nx+coin.vy*ny;
-      const vnX=vDotN*nx, vnY=vDotN*ny;
-      const vtX=coin.vx-vnX, vtY=coin.vy-vnY;
+
+      if(!hitCount) {
+        // どの方向にも重なっていない → 完全に壁から離れた
+        break;
+      }
+
+      // 平均法線（外向き方向）
+      let nx = nxSum / hitCount;
+      let ny = nySum / hitCount;
+      const len = Math.sqrt(nx*nx+ny*ny) || 1;
+      nx /= len; ny /= len;
+
+      // 速度ベクトルを法線・接線分解
+      const vDotN = coin.vx*nx + coin.vy*ny;
+      const vnX = vDotN*nx;
+      const vnY = vDotN*ny;
+      const vtX = coin.vx - vnX;
+      const vtY = coin.vy - vnY;
+
+      // 法線方向の速度はほぼゼロにして「壁に食い込む原因」を消す
       coin.vx = vtX;
       coin.vy = vtY;
-      // 外側に強く押し出す
-      const pushOut=3.0;
-      coin.x += nx*pushOut;
-      coin.y += ny*pushOut;
+
+      // 外側へ強く押し出して、リング全体が黒と被らない位置へ
+      const pushOut = 3.0; // 大きいほど壁から離れる
+      coin.x += nx * pushOut;
+      coin.y += ny * pushOut;
     }
   }
 
   function updatePhysics(){
     if(!coin.inPlay || coin.cleared || coin.failed) return;
 
-    // 1. 重力＋速度更新
+    // 1. 重力＋速度
     coin.vy += gravity;
     coin.vx *= (1-friction);
     coin.vy *= (1-friction);
     coin.x += coin.vx;
     coin.y += coin.vy;
 
-    // 2. 壁との衝突を最優先で解決
+    // 2. 壁との衝突：10円縁リングで絶対押し出し
     resolveWallCollision();
 
     // 3. 枠
@@ -615,7 +632,7 @@
     coin.angle += spin;
   }
 
-  // ========= レバーUI（長押しドラッグ） =========
+  // ========= レバーUI（長押しドラッグ）＋reba判定 =========
   function setupLeversUI(){
     leftLeverCol.innerHTML='';
     rightLeverCol.innerHTML='';
@@ -665,22 +682,19 @@
 
     const state={ index, side, slider, stick, value:0, storedValue:0, enabled:false };
 
-    // ドラッグ用
     let dragging=false;
-    let startY=0; // マウスのY位置
+    let startY=0;
     let startValue=0;
 
-    function onMouseDown(e){
+    function startDrag(clientY){
       if(calcState()!=='C' || !state.enabled) return;
       dragging=true;
-      startY=e.clientY;
+      startY=clientY;
       startValue=state.value;
-      e.preventDefault();
     }
-    function onMouseMove(e){
+    function moveDrag(clientY){
       if(!dragging) return;
-      const dy = startY - e.clientY; // 上にドラッグでプラス
-      // 重くする：値が高いほど増えにくい
+      const dy = startY - clientY; // 上にドラッグで +（溜め） 
       const stiffness = 1 + state.value/50;
       let newValue = startValue + (dy / stiffness);
       newValue = Math.max(0,Math.min(100,newValue));
@@ -691,10 +705,9 @@
       state.stick.style.transform=`translate(-50%, 0) rotate(${ang}deg)`;
       touchAction();
     }
-    function onMouseUp(){
+    function endDrag(){
       if(!dragging) return;
       dragging=false;
-      // 離した瞬間に発射
       if(state.storedValue>10){
         const power=state.storedValue/100;
         fireLever(state,power);
@@ -705,52 +718,41 @@
       state.stick.style.transform='translate(-50%, 0) rotate(0deg)';
     }
 
-    imgBox.addEventListener('mousedown',onMouseDown);
-    // PC向け
-    window.addEventListener('mousemove',onMouseMove);
-    window.addEventListener('mouseup',onMouseUp);
-
-    // タッチ対応
-    imgBox.addEventListener('touchstart',e=>{
-      if(calcState()!=='C' || !state.enabled) return;
-      dragging=true;
-      startY=e.touches[0].clientY;
-      startValue=state.value;
+    // PC
+    imgBox.addEventListener('mousedown',e=>{
       e.preventDefault();
+      startDrag(e.clientY);
+    });
+    window.addEventListener('mousemove',e=>{
+      moveDrag(e.clientY);
+    });
+    window.addEventListener('mouseup',()=>{
+      endDrag();
+    });
+
+    // タッチ
+    imgBox.addEventListener('touchstart',e=>{
+      e.preventDefault();
+      const t=e.touches[0];
+      startDrag(t.clientY);
     },{passive:false});
     window.addEventListener('touchmove',e=>{
       if(!dragging) return;
-      const dy = startY - e.touches[0].clientY;
-      const stiffness = 1 + state.value/50;
-      let newValue = startValue + (dy / stiffness);
-      newValue = Math.max(0,Math.min(100,newValue));
-      state.value = newValue;
-      state.storedValue = Math.max(state.storedValue, newValue);
-      slider.value = String(newValue);
-      const ang=-90*(newValue/100);
-      state.stick.style.transform=`translate(-50%, 0) rotate(angdeg)`;
+      const t=e.touches[0];
+      moveDrag(t.clientY);
     },{passive:false});
     window.addEventListener('touchend',()=>{
-      if(!dragging) return;
-      dragging=false;
-      if(state.storedValue>10){
-        const power=state.storedValue/100;
-        fireLever(state,power);
-      }
-      state.storedValue=0;
-      state.value=0;
-      slider.value='0';
-      state.stick.style.transform='translate(-50%, 0) rotate(0deg)';
+      endDrag();
     });
 
     return { container, state };
   }
 
-  // レバー打ち出し：reba黒上に10円がある時だけ
   function fireLever(lever,power){
     if(!coin.inPlay||coin.cleared||coin.failed) return;
     if(!rebaData) return;
-    if(!isBlackPixel(rebaData,coin.x,coin.y)) return; // レバー付近以外は空振り
+    // 10円中心が reba 黒の上にある時だけ発射
+    if(!isBlackPixel(rebaData,coin.x,coin.y)) return;
 
     const dirX=(lever.side==='left')?1:-1;
     const baseSpeed=16; // 強め
@@ -774,8 +776,7 @@
     // ren: 赤
     if(images.ren){
       ctx.save();
-      ctx.globalAlpha=0.3;
-      ctx.fillStyle='rgba(255,0,0,0.3)';
+      ctx.globalAlpha=0.35;
       ctx.drawImage(images.ren,0,0,canvas.width,canvas.height);
       ctx.restore();
     }
