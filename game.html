@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>10円ゲーム (Matter.js / ren.png から自動生成)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body { margin:0; padding:0; background:#111; color:#eee; font-family: sans-serif; }
+    #wrap { display:flex; height:100vh; overflow:hidden; }
+    #ui {
+      width: 280px; padding: 10px; box-sizing:border-box;
+      border-right: 1px solid #333; background:#0b0b0b;
+      font-size: 12px;
+    }
+    #ui h1 { font-size: 14px; margin: 0 0 10px; }
+    #ui .row { margin: 8px 0; }
+    #ui .label { color:#bbb; font-size: 11px; }
+    #ui button {
+      background:#333; color:#eee; border:1px solid #555; border-radius:4px;
+      padding: 6px 8px; cursor:pointer; font-size: 12px;
+    }
+    #ui button:hover { background:#444; }
+    #ui input[type="number"]{
+      width: 80px; background:#222; color:#eee; border:1px solid #555; border-radius:4px; padding:3px 6px;
+    }
+    #world { flex: 1; position: relative; }
+    canvas { display:block; background:#000; }
+    #hint { color:#9bd; line-height: 1.5; }
+    #status { white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color:#cfc; }
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <div id="ui">
+    <h1>10円ゲーム（自動生成）</h1>
+
+    <div class="row" id="hint">
+      ・入力: ren.png（黒=地形 / 赤=穴 / 緑=開始 / 黄=バネ）<br>
+      ・操作: コインがバネ範囲内のとき、ドラッグで引いて離すと発射<br>
+      ・目的: 穴に落ちないように転がす
+    </div>
+
+    <div class="row">
+      <div class="label">コイン半径(px)</div>
+      <input id="coinR" type="number" value="32" min="4" max="128">
+    </div>
+
+    <div class="row">
+      <div class="label">重力（Matter）</div>
+      <input id="gravityY" type="number" value="1" step="0.1" min="0" max="5">
+    </div>
+
+    <div class="row">
+      <div class="label">最大発射速度</div>
+      <input id="maxImpulse" type="number" value="18" step="1" min="1" max="80">
+    </div>
+
+    <div class="row">
+      <div class="label">上方向バイアス</div>
+      <input id="verticalBias" type="number" value="0.22" step="0.01" min="0" max="1">
+    </div>
+
+    <div class="row">
+      <button id="reloadBtn">ren.png から再生成</button>
+      <button id="respawnBtn">リスポーン</button>
+    </div>
+
+    <div class="row">
+      <div class="label">状態</div>
+      <div id="status">loading...</div>
+    </div>
+
+    <div class="row" style="color:#888">
+      ※ index.html は線エディタのまま残しています。<br>
+      game.html を開いてください。
+    </div>
+  </div>
+
+  <div id="world"></div>
+</div>
+
+<!-- Matter.js -->
+<script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
+
+<script>
+(() => {
+  const REN_URL = "ren.png";
+
+  // --- 色判定（多少のブレ許容） ---
+  // ※PNGのアンチエイリアス等があると境界で混色するので、閾値で判定します
+  function classifyPixel(r,g,b,a){
+    if (a < 10) return "empty";
+
+    // 黒（壁/斜面）
+    if (r < 40 && g < 40 && b < 40) return "black";
+
+    // 赤（穴）
+    if (r > 180 && g < 80 && b < 80) return "red";
+
+    // 緑（開始）
+    if (g > 160 && r < 120 && b < 120) return "green";
+
+    // 黄（バネ）: (r,g高く b低め)
+    if (r > 180 && g > 180 && b < 120) return "yellow";
+
+    return "empty";
+  }
+
+  // 4近傍で連結成分抽出（塗り領域の島を取りたいので4近傍推奨）
+  function extractComponents(mask, w, h){
+    // mask[y*w+x] が true のピクセルを島に分割
+    const visited = new Uint8Array(w*h);
+    const comps = [];
+    const qx = new Int32Array(w*h);
+    const qy = new Int32Array(w*h);
+
+    const idx = (x,y)=>y*w+x;
+    const push = (x,y,tail)=>{
+      qx[tail]=x; qy[tail]=y; return tail+1;
+    };
+
+    for(let y=0;y<h;y++){
+      for(let x=0;x<w;x++){
+        const i = idx(x,y);
+        if (!mask[i] || visited[i]) continue;
+
+        let head=0, tail=0;
+        tail = push(x,y,tail);
+        visited[i]=1;
+
+        let sumX=0, sumY=0, area=0;
+        let minX=x, minY=y, maxX=x, maxY=y;
+
+        while(head<tail){
+          const cx=qx[head], cy=qy[head]; head++;
+          area++;
+          sumX += cx; sumY += cy;
+          if (cx<minX) minX=cx; if (cy<minY) minY=cy;
+          if (cx>maxX) maxX=cx; if (cy>maxY) maxY=cy;
+
+          // 4-neighbors
+          const n1 = (cx>0)   ? idx(cx-1,cy) : -1;
+          const n2 = (cx<w-1) ? idx(cx+1,cy) : -1;
+          const n3 = (cy>0)   ? idx(cx,cy-1) : -1;
+          const n4 = (cy<h-1) ? idx(cx,cy+1) : -1;
+
+          if (n1>=0 && mask[n1] && !visited[n1]){ visited[n1]=1; tail=push(cx-1,cy,tail); }
+          if (n2>=0 && mask[n2] && !visited[n2]){ visited[n2]=1; tail=push(cx+1,cy,tail); }
+          if (n3>=0 && mask[n3] && !visited[n3]){ visited[n3]=1; tail=push(cx,cy-1,tail); }
+          if (n4>=0 && mask[n4] && !visited[n4]){ visited[n4]=1; tail=push(cx,cy+1,tail); }
+        }
+
+        const cx = sumX / area;
+        const cy = sumY / area;
+        comps.push({
+          area,
+          centroid: { x: cx, y: cy },
+          aabb: { minX, minY, maxX, maxY }
+        });
+      }
+    }
+
+    // 面積が小さいノイズを落とす（必要なら調整）
+    comps.sort((a,b)=>b.area-a.area);
+    return comps;
+  }
+
+  // 黒塗りから「境界点」を拾う（輪郭を厳密追跡せず、簡易に線分化するための前処理）
+  function extractBoundaryPoints(blackMask, w, h){
+    const pts = [];
+    const idx = (x,y)=>y*w+x;
+    for(let y=1;y<h-1;y++){
+      for(let x=1;x<w-1;x++){
+        const i = idx(x,y);
+        if (!blackMask[i]) continue;
+        // 周囲に非黒があれば境界
+        if (!blackMask[idx(x-1,y)] || !blackMask[idx(x+1,y)] || !blackMask[idx(x,y-1)] || !blackMask[idx(x,y+1)]) {
+          pts.push({x,y});
+        }
+      }
+    }
+    return pts;
+  }
+
+  // 境界点を「近傍でつないでポリラインっぽく」する簡易法
+  // 完璧な輪郭追跡ではないが、まず“坂として転がる地形”を作るための実用近似。
+  function pointsToSegmentsApprox(points, sampleStep=6){
+    // グリッド化して間引きし、近い点同士を結ぶ
+    // ※本命は輪郭追跡+RDPだが、まず動くこと優先
+    const segs = [];
+    const used = new Uint8Array(points.length);
+
+    // ざっくり近い順に結ぶ
+    for(let i=0;i<points.length;i+=sampleStep){
+      const p = points[i];
+      if (!p) continue;
+
+      // 近い点を1つ探して線分にする
+      let bestJ = -1;
+      let bestD2 = Infinity;
+      for(let j=i+1;j<Math.min(points.length, i+200);j++){
+        const q = points[j];
+        const dx=q.x-p.x, dy=q.y-p.y;
+        const d2=dx*dx+dy*dy;
+        if (d2>1 && d2<bestD2 && d2< (sampleStep*sampleStep*16)) {
+          bestD2=d2; bestJ=j;
+        }
+      }
+      if (bestJ>=0){
+        const q = points[bestJ];
+        segs.push({x1:p.x,y1:p.y,x2:q.x,y2:q.y});
+      }
+    }
+    return segs;
+  }
+
+  // Matter.js: 線分→薄い矩形ボディ（静的）
+  function segmentToBody(Matter, seg, thickness=4, opt={}){
+    const { Bodies } = Matter;
+    const x1=seg.x1, y1=seg.y1, x2=seg.x2, y2=seg.y2;
+    const mx=(x1+x2)/2, my=(y1+y2)/2;
+    const dx=x2-x1, dy=y2-y1;
+    const len=Math.hypot(dx,dy);
+    const ang=Math.atan2(dy,dx);
+    return Bodies.rectangle(mx, my, len, thickness, {
+      isStatic:true,
+      friction: 0.9,
+      restitution: 0,
+      angle: ang,
+      ...opt
+    });
+  }
+
+  // --- ゲーム本体 ---
+  const elWorld = document.getElementById("world");
+  const statusEl = document.getElementById("status");
+  const reloadBtn = document.getElementById("reloadBtn");
+  const respawnBtn = document.getElementById("respawnBtn");
+
+  const coinRInput = document.getElementById("coinR");
+  const gravityYInput = document.getElementById("gravityY");
+  const maxImpulseInput = document.getElementById("maxImpulse");
+  const verticalBiasInput = document.getElementById("verticalBias");
+
+  const Matter = window.Matter;
+  const { Engine, Render, Runner, World, Bodies, Body, Events, Composite } = Matter;
+
+  let engine, render, runner;
+  let renImage, renCanvas, renCtx, renData;
+  let mapW=0, mapH=0;
+
+  let coin=null;
+  let spawnPoint={x:100,y:100};
+
+  let holes=[];     // sensor circles
+  let springs=[];   // { body(sensor), center, dir, cooldownUntil, aabb }
+
+  let touchingGround = false;
+  let lastGroundNormal = null;
+
+  // レバー（簡易）：画面上でドラッグしてパワー決定。対象バネは「範囲内で最も近いもの」
+  let dragging=false;
+  let dragStart=null;
+  let dragNow=null;
+
+  function setStatus(lines){
+    statusEl.textContent = lines.join("\n");
+  }
+
+  function destroyWorld(){
+    if (render) {
+      Render.stop(render);
+      render.canvas.remove();
+      render.textures = {};
+      render = null;
+    }
+    if (runner) { Runner.stop(runner); runner=null; }
+    if (engine) { World.clear(engine.world, false); Engine.clear(engine); engine=null; }
+    holes=[]; springs=[];
+    coin=null;
+  }
+
+  async function loadRenPng(){
+    return new Promise((resolve,reject)=>{
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = REN_URL + "?t=" + Date.now();
+    });
+  }
+
+  function buildRenImageData(img){
+    mapW = img.naturalWidth || img.width;
+    mapH = img.naturalHeight || img.height;
+
+    renCanvas = document.createElement("canvas");
+    renCanvas.width = mapW;
+    renCanvas.height = mapH;
+    renCtx = renCanvas.getContext("2d", { willReadFrequently:true });
+    renCtx.drawImage(img, 0, 0);
+    renData = renCtx.getImageData(0,0,mapW,mapH);
+  }
+
+  function buildMasks(){
+    const w=mapW, h=mapH;
+    const data=renData.data;
+    const black = new Uint8Array(w*h);
+    const red   = new Uint8Array(w*h);
+    const green = new Uint8Array(w*h);
+    const yellow= new Uint8Array(w*h);
+
+    for(let y=0;y<h;y++){
+      for(let x=0;x<w;x++){
+        const i = (y*w+x)*4;
+        const r=data[i], g=data[i+1], b=data[i+2], a=data[i+3];
+        const c = classifyPixel(r,g,b,a);
+        const p = y*w+x;
+        if (c==="black") black[p]=1;
+        else if (c==="red") red[p]=1;
+        else if (c==="green") green[p]=1;
+        else if (c==="yellow") yellow[p]=1;
+      }
+    }
+    return {black, red, green, yellow};
+  }
+
+  function createEngineAndRenderer(){
+    engine = Engine.create();
+    engine.gravity.y = parseFloat(gravityYInput.value) || 1;
+
+    render = Render.create({
+      element: elWorld,
+      engine,
+      options: {
+        width: mapW,
+        height: mapH,
+        wireframes: false,
+        background: "#000",
+        hasBounds: false
+      }
+    });
+
+    runner = Runner.create();
+    Render.run(render);
+    Runner.run(runner, engine);
+  }
+
+  function addCoin(){
+    const r = parseFloat(coinRInput.value) || 32;
+
+    coin = Bodies.circle(spawnPoint.x, spawnPoint.y, r, {
+      restitution: 0,
+      friction: 0.05,
+      frictionStatic: 0.85,
+      frictionAir: 0.01,
+      density: 0.005,
+      render: {
+        fillStyle: "#b87333", // 銅っぽい
+        strokeStyle: "#5b2a12",
+        lineWidth: 2
+      }
+    });
+
+    World.add(engine.world, coin);
+  }
+
+  function respawn(){
+    if (!coin) return;
+    Body.setPosition(coin, {x:spawnPoint.x, y:spawnPoint.y});
+    Body.setVelocity(coin, {x:0, y:0});
+    Body.setAngularVelocity(coin, 0);
+  }
+
+  function addHolesFromComponents(redComps){
+    holes = [];
+    for (const c of redComps){
+      // 面積→半径推定（円近似）
+      const area = c.area;
+      let r = Math.sqrt(area / Math.PI);
+      r = Math.max(12, Math.min(90, r));
+
+      const hole = Bodies.circle(c.centroid.x, c.centroid.y, r, {
+        isStatic: true,
+        isSensor: true,
+        render: { fillStyle: "rgba(255,0,0,0.25)", strokeStyle: "rgba(255,0,0,0.7)", lineWidth: 1 }
+      });
+      hole.label = "hole";
+      holes.push(hole);
+    }
+    World.add(engine.world, holes);
+  }
+
+  function addSpringsFromComponents(yellowComps){
+    springs = [];
+    const centerX = mapW / 2;
+
+    // 6個想定：面積順で上位6だけ採用（ノイズ除去）
+    const picked = yellowComps.slice(0, 6);
+
+    for (const c of picked){
+      const dir = (c.centroid.x < centerX) ? +1 : -1;
+      const pad = 6;
+      const aabb = {
+        minX: c.aabb.minX - pad,
+        minY: c.aabb.minY - pad,
+        maxX: c.aabb.maxX + pad,
+        maxY: c.aabb.maxY + pad,
+      };
+
+      // センサー矩形（コインが入ってるか判定用）
+      const w = Math.max(10, aabb.maxX - aabb.minX);
+      const h = Math.max(10, aabb.maxY - aabb.minY);
+      const sensor = Bodies.rectangle(
+        (aabb.minX+aabb.maxX)/2,
+        (aabb.minY+aabb.maxY)/2,
+        w, h,
+        { isStatic:true, isSensor:true,
+          render:{ fillStyle:"rgba(255,255,0,0.18)", strokeStyle:"rgba(255,255,0,0.6)", lineWidth:1 }
+        }
+      );
+      sensor.label = "springSensor";
+
+      springs.push({
+        sensor,
+        center: { x: c.centroid.x, y: c.centroid.y },
+        dir,
+        cooldownUntil: 0,
+        aabb
+      });
+    }
+    World.add(engine.world, springs.map(s=>s.sensor));
+  }
+
+  function addTerrainFromBlack(blackMask){
+    // 境界点→簡易線分化→薄板ボディ
+    const boundaryPts = extractBoundaryPoints(blackMask, mapW, mapH);
+    const segs = pointsToSegmentsApprox(boundaryPts, 6);
+
+    const bodies = [];
+    for (const seg of segs){
+      const b = segmentToBody(Matter, seg, 4, {
+        render: { fillStyle: "#222" }
+      });
+      b.label = "terrain";
+      bodies.push(b);
+    }
+    World.add(engine.world, bodies);
+    return { boundaryPtsCount: boundaryPts.length, segCount: segs.length };
+  }
+
+  function findSpawnFromGreen(greenComps){
+    if (greenComps.length === 0) return {x:100,y:100};
+    // 一番大きい島
+    return { x: greenComps[0].centroid.x, y: greenComps[0].centroid.y };
+  }
+
+  function currentTimeSec(){
+    return performance.now() / 1000;
+  }
+
+  function coinInsideSpring(spring){
+    const p = coin.position;
+    const a = spring.aabb;
+    return (p.x >= a.minX && p.x <= a.maxX && p.y >= a.minY && p.y <= a.maxY);
+  }
+
+  function nearestAvailableSpring(){
+    let best=null, bestD2=Infinity;
+    for (const s of springs){
+      if (!coinInsideSpring(s)) continue;
+      const dx = coin.position.x - s.center.x;
+      const dy = coin.position.y - s.center.y;
+      const d2 = dx*dx+dy*dy;
+      if (d2 < bestD2) { bestD2=d2; best=s; }
+    }
+    return best;
+  }
+
+  function launchFromSpring(s, power01){
+    const now = currentTimeSec();
+    if (now < s.cooldownUntil) return;
+    if (!touchingGround) return; // 空中発動禁止
+
+    const maxImpulse = parseFloat(maxImpulseInput.value) || 18;
+    const verticalBias = parseFloat(verticalBiasInput.value) || 0.22;
+
+    const impulse = maxImpulse * Math.max(0, Math.min(1, power01));
+    // 速度上書き（仕様通り）
+    Body.setVelocity(coin, { x: s.dir * impulse, y: -impulse * verticalBias });
+    Body.setAngularVelocity(coin, 0);
+
+    // 0.3秒クールダウン
+    s.cooldownUntil = now + 0.3;
+  }
+
+  function installEvents(){
+    // 接地判定・穴判定
+    Events.on(engine, "collisionActive", (ev) => {
+      touchingGround = false;
+      lastGroundNormal = null;
+
+      for (const pair of ev.pairs){
+        const a = pair.bodyA, b = pair.bodyB;
+
+        // hole
+        if ((a === coin && b.label==="hole") || (b === coin && a.label==="hole")){
+          // 落下
+          respawn();
+          continue;
+        }
+
+        // terrain contact
+        const isTerrainContact =
+          (a === coin && b.label==="terrain") || (b === coin && a.label==="terrain");
+        if (isTerrainContact){
+          touchingGround = true;
+          // 接触法線（コイン側基準）
+          // pair.collision.normal は bodyB→bodyA 方向だったりするので、符号は厳密じゃないが
+          // 接線方向減衰の近似に使うだけなのでOK
+          lastGroundNormal = pair.collision.normal;
+        }
+      }
+    });
+
+    // 緩い坂で止める（嘘静止摩擦）
+    Events.on(engine, "afterUpdate", () => {
+      if (!coin) return;
+
+      // 状態表示
+      const sp = coin.speed.toFixed(2);
+      const av = coin.angularVelocity.toFixed(3);
+      setStatus([
+        `map: ${mapW}x${mapH}`,
+        `coin: r=${(parseFloat(coinRInput.value)||32)} speed=${sp} angVel=${av}`,
+        `touchingGround: ${touchingGround}`,
+        `springs: ${springs.length}, holes: ${holes.length}`,
+        dragging ? `drag: ${(Math.hypot(dragNow.x-dragStart.x, dragNow.y-dragStart.y)).toFixed(1)}px` : `drag: -`
+      ]);
+
+      if (!touchingGround || !lastGroundNormal) return;
+
+      // 接線方向 t を法線 n から作る
+      const n = lastGroundNormal;
+      const t = { x: -n.y, y: n.x };
+
+      const v = coin.velocity;
+      const vt = v.x*t.x + v.y*t.y;
+
+      // 緩い坂判定：法線がほぼ上向き（=平坦に近い）なら止まりやすくする
+      // nが(0,-1) 付近なら床、斜面が急になるほど |n.x| が増える想定
+      const slopeMeasure = Math.abs(n.x); // 0に近いほど平坦
+
+      // 速��が小さく、かつ斜面が緩いなら完全停止
+      if (Math.abs(vt) < 0.15 && Math.abs(coin.angularVelocity) < 0.02 && slopeMeasure < 0.25){
+        Body.setVelocity(coin, { x: 0, y: v.y }); // yは接触解決に任せる
+        Body.setAngularVelocity(coin, 0);
+      } else {
+        // 接線方向だけ少し減衰（転がりの“気持ちよさ”＋微振動対策）
+        const damp = (slopeMeasure < 0.25) ? 0.985 : 0.992;
+        const vt2 = vt * damp;
+        const dv = vt2 - vt;
+        Body.setVelocity(coin, { x: v.x + t.x*dv, y: v.y + t.y*dv });
+      }
+    });
+
+    // レバー（マウ���）
+    const canvas = () => render && render.canvas;
+
+    function getMousePos(e){
+      const rect = canvas().getBoundingClientRect();
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    }
+
+    function onDown(e){
+      if (!coin) return;
+      const s = nearestAvailableSpring();
+      if (!s) return;
+
+      dragging = true;
+      dragStart = getMousePos(e);
+      dragNow = {...dragStart};
+    }
+
+    function onMove(e){
+      if (!dragging) return;
+      dragNow = getMousePos(e);
+    }
+
+    function onUp(e){
+      if (!dragging) return;
+      dragging = false;
+
+      const s = nearestAvailableSpring();
+      if (!s) return;
+
+      const dx = dragNow.x - dragStart.x;
+      const dy = dragNow.y - dragStart.y;
+      const dist = Math.hypot(dx,dy);
+
+      const maxPull = 140; // 引ける最大距離（UIの感触）
+      const power01 = Math.max(0, Math.min(1, dist / maxPull));
+      launchFromSpring(s, power01);
+    }
+
+    // Render作成後にcanvasができるので、少し遅延して登録
+    setTimeout(() => {
+      if (!canvas()) return;
+      canvas().addEventListener("mousedown", onDown);
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    }, 0);
+  }
+
+  async function rebuild(){
+    destroyWorld();
+
+    setStatus(["loading ren.png..."]);
+    renImage = await loadRenPng();
+    buildRenImageData(renImage);
+
+    createEngineAndRenderer();
+
+    // 背景として ren.png をそのまま表示（見た目は分離したいが、まずはデバッグ用）
+    render.options.background = `url(${REN_URL})`;
+    render.canvas.style.backgroundSize = "100% 100%";
+
+    const {black, red, green, yellow} = buildMasks();
+
+    const greenComps = extractComponents(green, mapW, mapH);
+    const redComps = extractComponents(red, mapW, mapH);
+    const yellowComps = extractComponents(yellow, mapW, mapH);
+
+    spawnPoint = findSpawnFromGreen(greenComps);
+
+    const terrainInfo = addTerrainFromBlack(black);
+
+    addHolesFromComponents(redComps);
+    addSpringsFromComponents(yellowComps);
+    addCoin();
+
+    installEvents();
+
+    setStatus([
+      `map: ${mapW}x${mapH}`,
+      `spawn: (${spawnPoint.x.toFixed(1)}, ${spawnPoint.y.toFixed(1)})`,
+      `terrain boundaryPts=${terrainInfo.boundaryPtsCount} segs=${terrainInfo.segCount}`,
+      `holes=${redComps.length} springs=${Math.min(6, yellowComps.length)}`,
+      `ready`
+    ]);
+  }
+
+  // UI
+  reloadBtn.addEventListener("click", () => rebuild());
+  respawnBtn.addEventListener("click", () => respawn());
+  gravityYInput.addEventListener("change", () => { if(engine) engine.gravity.y = parseFloat(gravityYInput.value)||1; });
+
+  // start
+  rebuild().catch(err => {
+    console.error(err);
+    setStatus(["ERROR:", String(err)]);
+  });
+})();
+</script>
+</body>
+</html>
