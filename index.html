@@ -1,8 +1,9 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>10円ゲーム & ミニーム集</title>
+  <title>10円ゲーム & ミニゲーム集</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <style>
@@ -166,7 +167,7 @@
 
     .lever-slider {
       width: 70px;
-      pointer-events: none; /* 操作は長押しドラッグのみ */
+      pointer-events: none;
     }
 
     .lever-label {
@@ -181,7 +182,7 @@
   <button id="backToMenuBtn" style="font-size:12px; padding:6px 10px;">メニューへ</button>
 </div>
 
-<!-- 0. 入口メニュー -->
+<!-- 0. メニュー -->
 <div id="screen-menu" class="screen active">
   <div class="panel">
     <h1 class="menu-title">ミニゲーム選択</h1>
@@ -192,7 +193,7 @@
   </div>
 </div>
 
-<!-- 1. 名前入力画面 -->
+<!-- 1. 名前入力 -->
 <div id="screen-name" class="screen">
   <div class="panel">
     <h2>名前を入力してください</h2>
@@ -203,7 +204,7 @@
   </div>
 </div>
 
-<!-- 2. 10円ゲーム画面 -->
+<!-- 2. 10円ゲーム -->
 <div id="screen-10yen" class="screen">
   <div class="panel">
     <div class="status-bar">
@@ -239,7 +240,7 @@
   </div>
 </div>
 
-<!-- 3. じゃんけんゲーム（仮） -->
+<!-- 3. じゃんけん（仮） -->
 <div id="screen-janken" class="screen">
   <div class="panel">
     <h2>じゃんけんゲーム（仮）</h2>
@@ -252,7 +253,7 @@
 </div>
 
 <script type="module">
-  // ========= Firebase 初期化 =========
+  // ========= Firebase =========
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-app.js";
   import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-analytics.js";
   import {
@@ -280,7 +281,7 @@
   const analytics = getAnalytics(app);
   const db = getDatabase(app);
 
-  // ========= 画面切り替え =========
+  // ========= 画面切替 =========
   const screens = {
     menu: document.getElementById('screen-menu'),
     name: document.getElementById('screen-name'),
@@ -295,7 +296,7 @@
   document.getElementById('toJankenBtn').addEventListener('click', () => showScreen('janken'));
   document.getElementById('backToMenuBtn').addEventListener('click', () => showScreen('menu'));
 
-  // ========= 名前管理 =========
+  // ========= 名前 =========
   const nameInput = document.getElementById('playerNameInput');
   const decideNameBtn = document.getElementById('decideNameBtn');
   let myName = localStorage.getItem('10yen_name') || '';
@@ -530,8 +531,8 @@
       for(let dy=0;dy<20;dy++){
         const tx=sx, ty=sy+dy;
         let ok=true;
-        for(let i=0;i<16;i++){
-          const ang=Math.PI*2*i/16;
+        for(let i=0;i<12;i++){
+          const ang=Math.PI*2*i/12;
           const ex=tx+Math.cos(ang)*coin.r;
           const ey=ty+Math.sin(ang)*coin.r;
           if(renData && isBlackPixel(renData,ex,ey)){ ok=false; break; }
@@ -547,77 +548,64 @@
 
   const gravity=0.7, friction=0.012, bounce=0.25;
 
-  // 「10円の縁」のリングが ren 黒と絶対重ならないように押し出す
-  function resolveWallCollision(){
-    if(!renData) return;
-    const maxIter = 5;       // 1フレーム内で最大5回まで修正試行
-    const sampleCount = 24;  // 円周サンプル数（多いほど精度↑）
+  // V3に近い「シンプルな壁反射＋軽い押し戻し」
+  function collideWithRen(prevX, prevY) {
+    if (!renData) return;
 
-    for(let iter=0; iter<maxIter; iter++){
-      let hitCount=0;
-      let nxSum=0, nySum=0;
+    const sampleCount = 12;
+    let hitLeft=false, hitRight=false, hitTop=false, hitBottom=false;
+    let anyHit=false;
 
-      for(let i=0;i<sampleCount;i++){
-        const ang = Math.PI*2*i/sampleCount;
-        const sx = coin.x + Math.cos(ang)*coin.r;
-        const sy = coin.y + Math.sin(ang)*coin.r;
-        if(isBlackPixel(renData,sx,sy)){
-          // 10円中心→このサンプル方向ベクトル = 「壁の外向き」法線の近似
-          nxSum += Math.cos(ang);
-          nySum += Math.sin(ang);
-          hitCount++;
-        }
+    for (let i=0;i<sampleCount;i++){
+      const ang=Math.PI*2*i/sampleCount;
+      const sx=coin.x+Math.cos(ang)*coin.r;
+      const sy=coin.y+Math.sin(ang)*coin.r;
+      if (isBlackPixel(renData,sx,sy)){
+        anyHit=true;
+        if (Math.cos(ang)<-0.5) hitLeft=true;
+        if (Math.cos(ang)> 0.5) hitRight=true;
+        if (Math.sin(ang)<-0.5) hitTop=true;
+        if (Math.sin(ang)> 0.5) hitBottom=true;
       }
-
-      if(!hitCount) {
-        // どの方向にも重なっていない → 完全に壁から離れた
-        break;
-      }
-
-      // 平均法線（外向き方向）
-      let nx = nxSum / hitCount;
-      let ny = nySum / hitCount;
-      const len = Math.sqrt(nx*nx+ny*ny) || 1;
-      nx /= len; ny /= len;
-
-      // 速度ベクトルを法線・接線分解
-      const vDotN = coin.vx*nx + coin.vy*ny;
-      const vnX = vDotN*nx;
-      const vnY = vDotN*ny;
-      const vtX = coin.vx - vnX;
-      const vtY = coin.vy - vnY;
-
-      // 法線方向の速度はほぼゼロにして「壁に食い込む原因」を消す
-      coin.vx = vtX;
-      coin.vy = vtY;
-
-      // 外側へ強く押し出して、リング全体が黒と被らない位置へ
-      const pushOut = 3.0; // 大きいほど壁から離れる
-      coin.x += nx * pushOut;
-      coin.y += ny * pushOut;
     }
+
+    if (!anyHit) return;
+
+    // 壁内に入ったとみなして、前の位置方向に少し戻す
+    coin.x = (coin.x + prevX) / 2;
+    coin.y = (coin.y + prevY) / 2;
+
+    // 当たった方向に応じてバウンド
+    if (hitLeft && coin.vx<0)  coin.vx *= -bounce;
+    if (hitRight&& coin.vx>0)  coin.vx *= -bounce;
+    if (hitTop  && coin.vy<0)  coin.vy *= -bounce;
+    if (hitBottom&&coin.vy>0)  coin.vy *= -bounce;
   }
 
   function updatePhysics(){
     if(!coin.inPlay || coin.cleared || coin.failed) return;
 
-    // 1. 重力＋速度
+    const prevX = coin.x;
+    const prevY = coin.y;
+
+    // 重力＋摩擦
     coin.vy += gravity;
     coin.vx *= (1-friction);
     coin.vy *= (1-friction);
+
     coin.x += coin.vx;
     coin.y += coin.vy;
 
-    // 2. 壁との衝突：10円縁リングで絶対押し出し
-    resolveWallCollision();
+    // ren との単純衝突処理（V3寄り）
+    collideWithRen(prevX, prevY);
 
-    // 3. 枠
+    // 枠バウンス
     if(coin.x-coin.r<0){ coin.x=coin.r; coin.vx*=-bounce; }
     if(coin.x+coin.r>canvas.width){ coin.x=canvas.width-coin.r; coin.vx*=-bounce; }
     if(coin.y-coin.r<0){ coin.y=coin.r; coin.vy*=-bounce; }
     if(coin.y+coin.r>canvas.height){ coin.y=canvas.height-coin.r; coin.vy*=-bounce; }
 
-    // 4. 失敗／成功
+    // 失敗／成功
     if(anaData && isBlackPixel(anaData,coin.x,coin.y)){
       coin.inPlay=false; coin.failed=true; infoMsgEl.textContent='失敗…。また挑戦してね。';
     }
@@ -625,14 +613,14 @@
       coin.inPlay=false; coin.cleared=true; infoMsgEl.textContent='SUCCESS！おめでとう！';
     }
 
-    // 5. 回転
+    // 回転
     const speed=Math.sqrt(coin.vx*coin.vx+coin.vy*coin.vy);
     const maxSpin=0.25;
     const spin=Math.min(maxSpin,speed*0.03);
     coin.angle += spin;
   }
 
-  // ========= レバーUI（長押しドラッグ）＋reba判定 =========
+  // ========= レバーUI＋reba発射（現状維持） =========
   function setupLeversUI(){
     leftLeverCol.innerHTML='';
     rightLeverCol.innerHTML='';
@@ -694,7 +682,7 @@
     }
     function moveDrag(clientY){
       if(!dragging) return;
-      const dy = startY - clientY; // 上にドラッグで +（溜め） 
+      const dy = startY - clientY;
       const stiffness = 1 + state.value/50;
       let newValue = startValue + (dy / stiffness);
       newValue = Math.max(0,Math.min(100,newValue));
@@ -718,7 +706,6 @@
       state.stick.style.transform='translate(-50%, 0) rotate(0deg)';
     }
 
-    // PC
     imgBox.addEventListener('mousedown',e=>{
       e.preventDefault();
       startDrag(e.clientY);
@@ -730,7 +717,6 @@
       endDrag();
     });
 
-    // タッチ
     imgBox.addEventListener('touchstart',e=>{
       e.preventDefault();
       const t=e.touches[0];
@@ -751,11 +737,10 @@
   function fireLever(lever,power){
     if(!coin.inPlay||coin.cleared||coin.failed) return;
     if(!rebaData) return;
-    // 10円中心が reba 黒の上にある時だけ発射
     if(!isBlackPixel(rebaData,coin.x,coin.y)) return;
 
     const dirX=(lever.side==='left')?1:-1;
-    const baseSpeed=16; // 強め
+    const baseSpeed=16;
     const speed=baseSpeed*power;
     coin.vx += dirX*speed;
     coin.vy -= speed*0.5;
@@ -766,54 +751,26 @@
   function drawGame(){
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
-    // map
     if(images.map){
       ctx.globalAlpha=1.0;
-      ctx.globalCompositeOperation='source-over';
       ctx.drawImage(images.map,0,0,canvas.width,canvas.height);
     }
-
-    // ren: 赤
     if(images.ren){
-      ctx.save();
-      ctx.globalAlpha=0.35;
-      ctx.drawImage(images.ren,0,0,canvas.width,canvas.height);
-      ctx.restore();
+      ctx.save(); ctx.globalAlpha=0.35; ctx.drawImage(images.ren,0,0,canvas.width,canvas.height); ctx.restore();
     }
-
-    // ana: 青
     if(images.ana){
-      ctx.save();
-      ctx.globalAlpha=0.3;
-      ctx.drawImage(images.ana,0,0,canvas.width,canvas.height);
-      ctx.restore();
+      ctx.save(); ctx.globalAlpha=0.3; ctx.drawImage(images.ana,0,0,canvas.width,canvas.height); ctx.restore();
     }
-
-    // atari: 緑
     if(images.atari){
-      ctx.save();
-      ctx.globalAlpha=0.4;
-      ctx.drawImage(images.atari,0,0,canvas.width,canvas.height);
-      ctx.restore();
+      ctx.save(); ctx.globalAlpha=0.4; ctx.drawImage(images.atari,0,0,canvas.width,canvas.height); ctx.restore();
     }
-
-    // kaisi: 黄
     if(images.kaisi){
-      ctx.save();
-      ctx.globalAlpha=0.5;
-      ctx.drawImage(images.kaisi,0,0,canvas.width,canvas.height);
-      ctx.restore();
+      ctx.save(); ctx.globalAlpha=0.5; ctx.drawImage(images.kaisi,0,0,canvas.width,canvas.height); ctx.restore();
     }
-
-    // reba: マゼンタ
     if(images.reba){
-      ctx.save();
-      ctx.globalAlpha=0.4;
-      ctx.drawImage(images.reba,0,0,canvas.width,canvas.height);
-      ctx.restore();
+      ctx.save(); ctx.globalAlpha=0.4; ctx.drawImage(images.reba,0,0,canvas.width,canvas.height); ctx.restore();
     }
 
-    // 10円
     if(coin.inPlay||coin.cleared||coin.failed){
       ctx.save();
       ctx.translate(coin.x,coin.y);
