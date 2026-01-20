@@ -2,229 +2,153 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>10円ゲーム - 物理シミュレーション</title>
+  <title>10円ゲーム</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      background: #1a1a1a;
-      font-family: 'Arial', sans-serif;
+      background: #000;
       overflow: hidden;
       width: 100vw;
       height: 100vh;
-    }
-    #gameContainer {
-      position: relative;
-      width: 100%;
-      height: 100%;
       display: flex;
       align-items: center;
       justify-content: center;
     }
     #gameCanvas {
       display: block;
-      background: #000;
-      box-shadow: 0 0 20px rgba(0,0,0,0.5);
+      image-rendering: pixelated;
     }
     #ui {
       position: absolute;
       top: 10px;
       right: 10px;
-      background: rgba(0,0,0,0.7);
+      background: rgba(0,0,0,0.8);
       padding: 10px;
       border-radius: 5px;
       color: #fff;
       font-size: 12px;
-      min-width: 150px;
-      backdrop-filter: blur(5px);
+      font-family: sans-serif;
     }
-    #ui button {
+    #resetBtn {
       background: #444;
       color: #fff;
       border: none;
-      padding: 6px 12px;
-      margin: 3px 0;
+      padding: 8px 16px;
       border-radius: 3px;
       cursor: pointer;
-      width: 100%;
-      font-size: 11px;
+      font-size: 12px;
+      margin-top: 5px;
     }
-    #ui button:hover {
-      background: #555;
-    }
+    #resetBtn:hover { background: #666; }
     #status {
+      margin-top: 8px;
       font-size: 10px;
       color: #aaa;
-      margin-top: 5px;
       line-height: 1.4;
-    }
-    .spring-indicator {
-      position: absolute;
-      pointer-events: none;
-      z-index: 100;
-    }
-    .spring-line {
-      stroke: #ff0;
-      stroke-width: 3;
-      stroke-linecap: round;
     }
   </style>
 </head>
 <body>
-  <div id="gameContainer">
-    <canvas id="gameCanvas"></canvas>
-    <div id="ui">
-      <div style="font-weight: bold; margin-bottom: 8px;">10円ゲーム</div>
-      <button id="resetBtn">リセット</button>
-      <div id="status"></div>
-    </div>
-    <svg id="springOverlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></svg>
+  <canvas id="gameCanvas"></canvas>
+  <div id="ui">
+    <div style="font-weight: bold;">10円ゲーム</div>
+    <button id="resetBtn">リセット</button>
+    <div id="status">読み込み中...</div>
   </div>
 
-  <!-- Matter.js -->
   <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
   
   <script>
-  (() => {
+  (async () => {
     'use strict';
     
-    // === 設定 ===
-    const CONFIG = {
-      mapImage: 'map.png',      // 表示用背景
-      settingsImage: 'ren.png', // 物理構造定義
-      
-      // 10円硬貨の物理定数
-      coin: {
-        radius: 11.5,           // 10円硬貨の実際の半径(mm) → ピクセルスケール調整
-        mass: 0.0045,           // 4.5g (10円硬貨の実際の質量をkg単位で)
-        density: 0.008,         // Matter.jsの密度パラメータ
-        friction: 0.3,          // 摩擦係数
-        frictionAir: 0.01,      // 空気抵抗
-        restitution: 0.2,       // 反発係数（やや弾む程度）
-        frictionStatic: 1.2,    // 静止摩擦（止まりやすく）
-      },
-      
-      // 物理エンジン設定
-      physics: {
-        gravity: 0.98,          // 重力加速度（調整値）
-        timeScale: 1.0,         // 時間スケール
-      },
-      
-      // バネ（レバー）設定
-      spring: {
-        maxPull: 150,           // 最大引き距離
-        powerMultiplier: 0.15,  // 力の倍率
-        cooldown: 500,          // クールダウン時間(ms)
-      },
-      
-      // 色定義（ren.pngから読み取る）
-      colors: {
-        black:  { threshold: 40, type: 'wall' },    // 黒 = 壁・坂
-        yellow: { r: 180, g: 180, b: 120, tolerance: 80, type: 'spring' }, // 黄 = バネ
-        green:  { r: 120, g: 160, b: 120, tolerance: 80, type: 'spawn' },  // 緑 = 開始地点
-        red:    { r: 180, g: 80, b: 80, tolerance: 80, type: 'hole' },     // 赤 = 穴
-      },
-    };
-    
-    // === グローバル変数 ===
-    let engine, render, runner, world;
-    let coin = null;
-    let springs = [];
-    let holes = [];
-    let spawnPoint = { x: 100, y: 100 };
-    let mapImage, settingsImage;
-    let settingsData;
-    let canvas, ctx;
-    
-    let activeSpr = null;
-    let pullStart = null;
-    let pullCurrent = null;
-    
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
     const statusEl = document.getElementById('status');
     const resetBtn = document.getElementById('resetBtn');
-    const springOverlay = document.getElementById('springOverlay');
     
-    // === 初期化 ===
-    async function init() {
-      try {
-        updateStatus('Loading images...');
-        
-        // 画像読み込み
-        [mapImage, settingsImage] = await Promise.all([
-          loadImage(CONFIG.mapImage),
-          loadImage(CONFIG.settingsImage)
-        ]);
-        
-        // ren.pngから物理構造を読み取る
-        settingsData = analyzeSettings(settingsImage);
-        
-        updateStatus('Initializing physics...');
-        
-        // Matter.js初期化
-        initMatter();
-        
-        // 物理オブジェクト生成
-        createPhysicsObjects();
-        
-        // イベント設定
-        setupEvents();
-        
-        updateStatus('Ready! ドラッグしてコインを発射');
-        
-      } catch (error) {
-        console.error('Initialization error:', error);
-        updateStatus('Error: ' + error.message);
-      }
-    }
+    // 設定
+    const CONFIG = {
+      coinRadius: 29,  // 10円硬貨の半径（ピクセル、視覚的サイズ調整済み）
+      coinMass: 0.0055,  // 5.5g → kg
+      gravity: 1.0,
+      friction: 0.6,
+      restitution: 0.1,
+      leverMaxAngle: Math.PI / 2,  // 90度
+      leverResistance: 0.4,  // バネの抵抗
+    };
     
-    // === 画像読み込み ===
-    function loadImage(src) {
+    let engine, world, coin, render;
+    let mapImg, renImg, renData;
+    let mapW, mapH;
+    let spawnPoint = { x: 100, y: 100 };
+    let springs = [];
+    let holes = [];
+    let walls = [];
+    
+    // レバー状態
+    let activeLever = null;
+    let leverStartAngle = 0;
+    let leverCurrentAngle = 0;
+    let leverPivot = null;
+    
+    // 画像読み込み
+    async function loadImage(src) {
       return new Promise((resolve, reject) => {
         const img = new Image();
+        img.crossOrigin = 'anonymous';
         img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error(`Failed to load ${src}`));
+        img.onerror = () => reject(new Error('Failed to load ' + src));
         img.src = src + '?t=' + Date.now();
       });
     }
     
-    // === ren.png解析 ===
-    function analyzeSettings(img) {
-      const w = img.naturalWidth || img.width;
-      const h = img.naturalHeight || img.height;
+    // 色判定
+    function getPixelType(r, g, b, a) {
+      if (a < 10) return null;
+      
+      // 黒 = 壁
+      if (r < 50 && g < 50 && b < 50) return 'wall';
+      
+      // 黄色 = 発射台
+      if (r > 180 && g > 180 && b < 120) return 'spring';
+      
+      // 緑 = スポーン
+      if (g > 150 && r < 120 && b < 120) return 'spawn';
+      
+      // 赤 = 穴
+      if (r > 180 && g < 100 && b < 100) return 'hole';
+      
+      return null;
+    }
+    
+    // ren.png解析
+    function analyzeRenPng(img) {
+      const w = img.width;
+      const h = img.height;
       
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = w;
       tempCanvas.height = h;
       const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
       tempCtx.drawImage(img, 0, 0);
-      const imageData = tempCtx.getImageData(0, 0, w, h);
-      const data = imageData.data;
+      const data = tempCtx.getImageData(0, 0, w, h);
       
-      const walls = [];
-      const springPoints = [];
-      const holePoints = [];
+      const wallPixels = [];
+      const springPixels = [];
+      const holePixels = [];
       let spawnX = 0, spawnY = 0, spawnCount = 0;
       
-      // ピクセルスキャン
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
           const i = (y * w + x) * 4;
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          const a = data[i + 3];
+          const type = getPixelType(data.data[i], data.data[i+1], data.data[i+2], data.data[i+3]);
           
-          if (a < 10) continue;
-          
-          const type = classifyPixel(r, g, b);
-          
-          if (type === 'wall') {
-            walls.push({ x, y });
-          } else if (type === 'spring') {
-            springPoints.push({ x, y });
-          } else if (type === 'hole') {
-            holePoints.push({ x, y });
-          } else if (type === 'spawn') {
+          if (type === 'wall') wallPixels.push({x, y});
+          else if (type === 'spring') springPixels.push({x, y});
+          else if (type === 'hole') holePixels.push({x, y});
+          else if (type === 'spawn') {
             spawnX += x;
             spawnY += y;
             spawnCount++;
@@ -239,509 +163,407 @@
       return {
         width: w,
         height: h,
-        walls,
-        springs: extractComponents(springPoints, w, h),
-        holes: extractComponents(holePoints, w, h),
+        wallPixels,
+        springRegions: clusterPixels(springPixels, w, h),
+        holeRegions: clusterPixels(holePixels, w, h),
         spawn: spawnPoint
       };
     }
     
-    // === 色分類 ===
-    function classifyPixel(r, g, b) {
-      // 黒（壁）
-      if (r < CONFIG.colors.black.threshold && 
-          g < CONFIG.colors.black.threshold && 
-          b < CONFIG.colors.black.threshold) {
-        return 'wall';
-      }
-      
-      // 黄（バネ）
-      if (Math.abs(r - CONFIG.colors.yellow.r) < CONFIG.colors.yellow.tolerance &&
-          Math.abs(g - CONFIG.colors.yellow.g) < CONFIG.colors.yellow.tolerance &&
-          Math.abs(b - CONFIG.colors.yellow.b) < CONFIG.colors.yellow.tolerance) {
-        return 'spring';
-      }
-      
-      // 緑（スポーン）
-      if (Math.abs(g - CONFIG.colors.green.g) < CONFIG.colors.green.tolerance &&
-          r < 140 && b < 140) {
-        return 'spawn';
-      }
-      
-      // 赤（穴）
-      if (Math.abs(r - CONFIG.colors.red.r) < CONFIG.colors.red.tolerance &&
-          g < 100 && b < 100) {
-        return 'hole';
-      }
-      
-      return null;
-    }
-    
-    // === 連結成分抽出 ===
-    function extractComponents(points, w, h) {
-      if (points.length === 0) return [];
+    // ピクセルをクラスタリング
+    function clusterPixels(pixels, w, h) {
+      if (pixels.length === 0) return [];
       
       const visited = new Set();
-      const components = [];
+      const regions = [];
       
-      for (const point of points) {
-        const key = `${point.x},${point.y}`;
+      for (const pixel of pixels) {
+        const key = `${pixel.x},${pixel.y}`;
         if (visited.has(key)) continue;
         
-        const component = [];
-        const queue = [point];
+        const region = [];
+        const queue = [pixel];
         visited.add(key);
         
         while (queue.length > 0) {
           const p = queue.shift();
-          component.push(p);
+          region.push(p);
           
-          // 4近傍チェック
+          // 4近傍
           const neighbors = [
-            { x: p.x - 1, y: p.y },
-            { x: p.x + 1, y: p.y },
-            { x: p.x, y: p.y - 1 },
-            { x: p.x, y: p.y + 1 },
+            {x: p.x-1, y: p.y}, {x: p.x+1, y: p.y},
+            {x: p.x, y: p.y-1}, {x: p.x, y: p.y+1}
           ];
           
           for (const n of neighbors) {
             const nKey = `${n.x},${n.y}`;
-            if (!visited.has(nKey) && points.some(pt => pt.x === n.x && pt.y === n.y)) {
+            if (visited.has(nKey)) continue;
+            if (pixels.some(pp => pp.x === n.x && pp.y === n.y)) {
               visited.add(nKey);
               queue.push(n);
             }
           }
         }
         
-        if (component.length > 0) {
-          const sumX = component.reduce((s, p) => s + p.x, 0);
-          const sumY = component.reduce((s, p) => s + p.y, 0);
-          const minX = Math.min(...component.map(p => p.x));
-          const maxX = Math.max(...component.map(p => p.x));
-          const minY = Math.min(...component.map(p => p.y));
-          const maxY = Math.max(...component.map(p => p.y));
+        if (region.length > 10) {
+          const sumX = region.reduce((s, p) => s + p.x, 0);
+          const sumY = region.reduce((s, p) => s + p.y, 0);
+          const minX = Math.min(...region.map(p => p.x));
+          const maxX = Math.max(...region.map(p => p.x));
+          const minY = Math.min(...region.map(p => p.y));
+          const maxY = Math.max(...region.map(p => p.y));
           
-          components.push({
-            points: component,
-            center: { x: sumX / component.length, y: sumY / component.length },
+          regions.push({
+            center: { x: sumX / region.length, y: sumY / region.length },
             bounds: { minX, maxX, minY, maxY },
-            area: component.length
+            area: region.length
           });
         }
       }
       
-      return components.sort((a, b) => b.area - a.area);
+      return regions.sort((a, b) => b.area - a.area);
     }
     
-    // === Matter.js初期化 ===
-    function initMatter() {
-      const { Engine, Render, Runner, World, Bodies } = Matter;
+    // Matter.js初期化
+    function initPhysics() {
+      const { Engine, World, Bodies } = Matter;
       
       engine = Engine.create();
-      engine.gravity.y = CONFIG.physics.gravity;
-      engine.timing.timeScale = CONFIG.physics.timeScale;
-      
+      engine.gravity.y = CONFIG.gravity;
       world = engine.world;
       
-      canvas = document.getElementById('gameCanvas');
-      canvas.width = settingsData.width;
-      canvas.height = settingsData.height;
+      // 壁生成（簡易版：境界ピクセルから線分作成）
+      const boundaryPixels = findBoundaryPixels(renData.wallPixels, mapW, mapH);
       
-      render = Render.create({
-        canvas: canvas,
-        engine: engine,
-        options: {
-          width: settingsData.width,
-          height: settingsData.height,
-          wireframes: false,
-          background: 'transparent'
-        }
-      });
-      
-      // map.pngを背景に描画
-      ctx = canvas.getContext('2d');
-      
-      runner = Runner.create();
-      Render.run(render);
-      Runner.run(runner, engine);
-      
-      // 背景描画（フレームごと）
-      Matter.Events.on(render, 'afterRender', () => {
-        if (mapImage) {
-          const renderCtx = render.context;
-          renderCtx.globalCompositeOperation = 'destination-over';
-          renderCtx.drawImage(mapImage, 0, 0, settingsData.width, settingsData.height);
-          renderCtx.globalCompositeOperation = 'source-over';
-        }
-      });
-    }
-    
-    // === 物理オブジェクト生成 ===
-    function createPhysicsObjects() {
-      const { Bodies, Body, World } = Matter;
-      
-      // 壁生成（Marching Squaresベースの輪郭抽出）
-      if (settingsData.walls.length > 0) {
-        const wallBodies = createWallsFromPoints(settingsData.walls);
-        World.add(world, wallBodies);
+      // グリッド分割して線分化
+      for (let i = 0; i < boundaryPixels.length; i += 5) {
+        if (i + 1 >= boundaryPixels.length) break;
+        
+        const p1 = boundaryPixels[i];
+        const p2 = boundaryPixels[i + 1];
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const length = Math.sqrt(dx*dx + dy*dy);
+        
+        if (length < 2 || length > 50) continue;
+        
+        const angle = Math.atan2(dy, dx);
+        const cx = (p1.x + p2.x) / 2;
+        const cy = (p1.y + p2.y) / 2;
+        
+        const wall = Bodies.rectangle(cx, cy, length, 8, {
+          isStatic: true,
+          angle: angle,
+          friction: CONFIG.friction,
+          render: { visible: false }
+        });
+        wall.label = 'wall';
+        World.add(world, wall);
+        walls.push(wall);
       }
       
-      // バネ生成
+      // 発射台生成
       springs = [];
-      const springComps = settingsData.springs.slice(0, 6); // 最大6個
-      const centerX = settingsData.width / 2;
+      const centerX = mapW / 2;
       
-      for (const comp of springComps) {
-        const isLeft = comp.center.x < centerX;
-        const direction = isLeft ? 1 : -1; // 左のバネは右へ、右のバネは左へ
-        
-        const w = comp.bounds.maxX - comp.bounds.minX + 20;
-        const h = comp.bounds.maxY - comp.bounds.minY + 20;
-        
-        const sensor = Bodies.rectangle(
-          comp.center.x,
-          comp.center.y,
-          w, h,
-          {
-            isStatic: true,
-            isSensor: true,
-            render: {
-              fillStyle: 'rgba(255, 255, 0, 0.2)',
-              strokeStyle: 'rgba(255, 255, 0, 0.5)',
-              lineWidth: 2
-            }
-          }
-        );
-        sensor.label = 'spring';
+      for (const region of renData.springRegions.slice(0, 6)) {
+        const isRight = region.center.x > centerX;
+        const direction = isRight ? -1 : 1;  // 右側→左へ、左側→右へ
         
         springs.push({
-          body: sensor,
-          center: comp.center,
+          center: region.center,
+          bounds: region.bounds,
           direction: direction,
-          cooldownUntil: 0,
-          isLeft: isLeft
+          isRight: isRight
         });
-        
-        World.add(world, sensor);
       }
       
       // 穴生成
       holes = [];
-      for (const comp of settingsData.holes) {
-        const radius = Math.sqrt(comp.area / Math.PI);
-        const hole = Bodies.circle(
-          comp.center.x,
-          comp.center.y,
-          radius,
-          {
-            isStatic: true,
-            isSensor: true,
-            render: {
-              fillStyle: 'rgba(200, 0, 0, 0.3)',
-              strokeStyle: 'rgba(255, 0, 0, 0.6)',
-              lineWidth: 2
-            }
-          }
-        );
+      for (const region of renData.holeRegions) {
+        const radius = Math.sqrt(region.area / Math.PI) * 0.8;
+        const hole = Bodies.circle(region.center.x, region.center.y, radius, {
+          isStatic: true,
+          isSensor: true,
+          render: { visible: false }
+        });
         hole.label = 'hole';
-        holes.push({ body: hole, center: comp.center, radius });
         World.add(world, hole);
+        holes.push({ body: hole, center: region.center, radius });
       }
       
-      // 10円硬貨生成
+      // コイン生成
       createCoin();
     }
     
-    // === 壁生成（簡易版Marching Squares） ===
-    function createWallsFromPoints(wallPoints) {
-      const { Bodies } = Matter;
-      const bodies = [];
+    // 境界ピクセル検出
+    function findBoundaryPixels(wallPixels, w, h) {
+      const wallSet = new Set(wallPixels.map(p => `${p.x},${p.y}`));
+      const boundary = [];
       
-      // 境界点を抽出
-      const boundaryPoints = wallPoints.filter(p => {
-        return !wallPoints.some(wp => 
-          (wp.x === p.x - 1 && wp.y === p.y) &&
-          (wp.x === p.x + 1 && wp.y === p.y) &&
-          (wp.x === p.x && wp.y === p.y - 1) &&
-          (wp.x === p.x && wp.y === p.y + 1)
-        );
-      });
-      
-      // 線分生成（簡易版）
-      for (let i = 0; i < boundaryPoints.length; i += 3) {
-        const p1 = boundaryPoints[i];
-        const p2 = boundaryPoints[Math.min(i + 1, boundaryPoints.length - 1)];
+      for (const p of wallPixels) {
+        // 4近傍に空きがあれば境界
+        const neighbors = [
+          `${p.x-1},${p.y}`, `${p.x+1},${p.y}`,
+          `${p.x},${p.y-1}`, `${p.x},${p.y+1}`
+        ];
         
-        const dx = p2.x - p1.x;
-        const dy = p2.y - p1.y;
-        const length = Math.sqrt(dx * dx + dy * dy);
-        
-        if (length < 1) continue;
-        
-        const angle = Math.atan2(dy, dx);
-        const centerX = (p1.x + p2.x) / 2;
-        const centerY = (p1.y + p2.y) / 2;
-        
-        const wall = Bodies.rectangle(
-          centerX, centerY,
-          length, 6,
-          {
-            isStatic: true,
-            angle: angle,
-            friction: 0.8,
-            render: {
-              fillStyle: '#222'
-            }
-          }
-        );
-        wall.label = 'wall';
-        bodies.push(wall);
+        if (neighbors.some(n => !wallSet.has(n))) {
+          boundary.push(p);
+        }
       }
       
-      return bodies;
+      return boundary;
     }
     
-    // === 10円硬貨生成 ===
+    // コイン生成
     function createCoin() {
-      const { Bodies, Body, World } = Matter;
+      const { Bodies, World } = Matter;
       
-      if (coin) {
-        World.remove(world, coin);
-      }
+      if (coin) World.remove(world, coin);
       
-      const scaledRadius = CONFIG.coin.radius * 2.5; // ピクセルスケール調整
-      
-      coin = Bodies.circle(
-        settingsData.spawn.x,
-        settingsData.spawn.y,
-        scaledRadius,
-        {
-          density: CONFIG.coin.density,
-          friction: CONFIG.coin.friction,
-          frictionAir: CONFIG.coin.frictionAir,
-          frictionStatic: CONFIG.coin.frictionStatic,
-          restitution: CONFIG.coin.restitution,
-          render: {
-            sprite: {
-              texture: 'data:image/svg+xml;base64,' + createCoinTexture(),
-              xScale: scaledRadius * 2 / 100,
-              yScale: scaledRadius * 2 / 100
-            }
-          }
-        }
-      );
+      coin = Bodies.circle(spawnPoint.x, spawnPoint.y, CONFIG.coinRadius, {
+        density: CONFIG.coinMass / (Math.PI * CONFIG.coinRadius * CONFIG.coinRadius),
+        friction: CONFIG.friction,
+        frictionStatic: 1.0,
+        frictionAir: 0.01,
+        restitution: CONFIG.restitution,
+        render: { visible: false }
+      });
       coin.label = 'coin';
       
       World.add(world, coin);
     }
     
-    // === 10円硬貨のテクスチャ生成 ===
-    function createCoinTexture() {
-      const svg = `
-        <svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <radialGradient id="coinGrad">
-              <stop offset="0%" style="stop-color:#cd7f32"/>
-              <stop offset="50%" style="stop-color:#b87333"/>
-              <stop offset="100%" style="stop-color:#8b5a3c"/>
-            </radialGradient>
-          </defs>
-          <circle cx="50" cy="50" r="48" fill="url(#coinGrad)" stroke="#5d3a1a" stroke-width="2"/>
-          <text x="50" y="50" text-anchor="middle" dominant-baseline="central" 
-                font-family="serif" font-size="35" font-weight="bold" fill="#5d3a1a">10</text>
-          <text x="50" y="75" text-anchor="middle" font-family="serif" font-size="12" fill="#5d3a1a">円</text>
-        </svg>`;
-      return btoa(unescape(encodeURIComponent(svg)));
-    }
-    
-    // === イベント設定 ===
-    function setupEvents() {
-      const { Events, Body } = Matter;
-      
-      // 穴との衝突検出
-      Events.on(engine, 'collisionStart', (event) => {
-        event.pairs.forEach(pair => {
-          if ((pair.bodyA === coin && pair.bodyB.label === 'hole') ||
-              (pair.bodyB === coin && pair.bodyA.label === 'hole')) {
-            handleCoinInHole();
-          }
-        });
-      });
-      
-      // マウスイベント
-      canvas.addEventListener('mousedown', onMouseDown);
-      canvas.addEventListener('mousemove', onMouseMove);
-      canvas.addEventListener('mouseup', onMouseUp);
-      canvas.addEventListener('touchstart', onTouchStart, { passive: false });
-      canvas.addEventListener('touchmove', onTouchMove, { passive: false });
-      canvas.addEventListener('touchend', onTouchEnd, { passive: false });
-      
-      // リセットボタン
-      resetBtn.addEventListener('click', resetCoin);
-      
-      // ステータス更新
-      Events.on(engine, 'afterUpdate', updateGameStatus);
-    }
-    
-    // === マウス/タッチイベント ===
-    function onMouseDown(e) {
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      handlePullStart(x, y);
-    }
-    
-    function onMouseMove(e) {
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      handlePullMove(x, y);
-    }
-    
-    function onMouseUp(e) {
-      handlePullEnd();
-    }
-    
-    function onTouchStart(e) {
-      e.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      const touch = e.touches[0];
-      const x = touch.clientX - rect.left;
-      const y = touch.clientY - rect.top;
-      handlePullStart(x, y);
-    }
-    
-    function onTouchMove(e) {
-      e.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      const touch = e.touches[0];
-      const x = touch.clientX - rect.left;
-      const y = touch.clientY - rect.top;
-      handlePullMove(x, y);
-    }
-    
-    function onTouchEnd(e) {
-      e.preventDefault();
-      handlePullEnd();
-    }
-    
-    // === バネ引く開始 ===
-    function handlePullStart(x, y) {
+    // レバー開始
+    function startLever(x, y) {
       if (!coin) return;
       
-      const now = Date.now();
-      
-      // コインがバネエリア内にあるかチェック
+      // コインが発射台上にあるか確認
       for (const spring of springs) {
-        if (now < spring.cooldownUntil) continue;
-        
-        const dx = coin.position.x - spring.center.x;
-        const dy = coin.position.y - spring.center.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        
-        if (dist < 80) { // バネ範囲内
-          activeSpr = spring;
-          pullStart = { x, y };
-          pullCurrent = { x, y };
-          return;
+        const b = spring.bounds;
+        if (coin.position.x >= b.minX - 10 && coin.position.x <= b.maxX + 10 &&
+            coin.position.y >= b.minY - 10 && coin.position.y <= b.maxY + 10) {
+          
+          // レバーの中心点（発射台の逆側）
+          leverPivot = {
+            x: spring.isRight ? b.minX - 60 : b.maxX + 60,
+            y: spring.center.y
+          };
+          
+          leverStartAngle = Math.atan2(y - leverPivot.y, x - leverPivot.x);
+          leverCurrentAngle = leverStartAngle;
+          activeLever = spring;
+          break;
         }
       }
     }
     
-    // === バネ引く移動 ===
-    function handlePullMove(x, y) {
-      if (!activeSpr || !pullStart) return;
-      pullCurrent = { x, y };
-      drawSpringLine();
+    // レバー移動
+    function moveLever(x, y) {
+      if (!activeLever || !leverPivot) return;
+      
+      const angle = Math.atan2(y - leverPivot.y, x - leverPivot.x);
+      let deltaAngle = angle - leverStartAngle;
+      
+      // 時計回りに0-90度制限
+      if (activeLever.isRight) {
+        // 右側：下向きから時計回り
+        deltaAngle = Math.max(0, Math.min(CONFIG.leverMaxAngle, deltaAngle));
+      } else {
+        // 左側：下向きから反時計回り
+        deltaAngle = Math.max(-CONFIG.leverMaxAngle, Math.min(0, deltaAngle));
+      }
+      
+      leverCurrentAngle = leverStartAngle + deltaAngle;
     }
     
-    // === バネ引く終了（発射） ===
-    function handlePullEnd() {
-      if (!activeSpr || !pullStart || !pullCurrent) {
-        clearSpringLine();
+    // レバー離す（発射）
+    function releaseLever() {
+      if (!activeLever || !leverPivot || !coin) {
+        activeLever = null;
+        leverPivot = null;
         return;
       }
       
-      const dx = pullCurrent.x - pullStart.x;
-      const dy = pullCurrent.y - pullStart.y;
-      const pullDist = Math.sqrt(dx * dx + dy * dy);
+      let pullAngle = Math.abs(leverCurrentAngle - leverStartAngle);
       
-      if (pullDist > 5) {
-        // 引いた距離に応じて力を計算
-        const power = Math.min(pullDist / CONFIG.spring.maxPull, 1.0);
-        const force = power * CONFIG.spring.powerMultiplier;
+      // バネ抵抗を考慮した力計算
+      const t = pullAngle / CONFIG.leverMaxAngle;
+      const power = t * t * 30;  // 二次関数でバネの抵抗を表現
+      
+      // 発射方向（水平+少し上向き）
+      const launchAngle = activeLever.direction > 0 ? -0.2 : Math.PI + 0.2;
+      const vx = Math.cos(launchAngle) * power;
+      const vy = Math.sin(launchAngle) * power;
+      
+      Matter.Body.setVelocity(coin, { x: vx, y: vy });
+      
+      activeLever = null;
+      leverPivot = null;
+    }
+    
+    // 描画
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // map.png背景
+      ctx.drawImage(mapImg, 0, 0, mapW, mapH);
+      
+      // コイン描画
+      if (coin) {
+        ctx.save();
+        ctx.translate(coin.position.x, coin.position.y);
+        ctx.rotate(coin.angle);
         
-        // バネの向きに応じて発射
-        const launchAngle = -0.3; // 上向きバイアス
-        const vx = activeSpr.direction * force * Math.abs(Math.cos(launchAngle));
-        const vy = force * Math.sin(launchAngle);
+        // 銅色の円
+        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, CONFIG.coinRadius);
+        grad.addColorStop(0, '#cd7f32');
+        grad.addColorStop(0.7, '#b87333');
+        grad.addColorStop(1, '#8b5a3c');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(0, 0, CONFIG.coinRadius, 0, Math.PI * 2);
+        ctx.fill();
         
-        Matter.Body.setVelocity(coin, { x: vx * 100, y: vy * 100 });
+        // 縁
+        ctx.strokeStyle = '#5d3a1a';
+        ctx.lineWidth = 2;
+        ctx.stroke();
         
-        // クールダウン設定
-        activeSpr.cooldownUntil = Date.now() + CONFIG.spring.cooldown;
+        // "10"文字
+        ctx.fillStyle = '#5d3a1a';
+        ctx.font = 'bold 24px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('10', 0, -3);
+        
+        ctx.font = '10px serif';
+        ctx.fillText('円', 0, 12);
+        
+        ctx.restore();
       }
       
-      activeSpr = null;
-      pullStart = null;
-      pullCurrent = null;
-      clearSpringLine();
+      // レバー描画
+      if (activeLever && leverPivot) {
+        const leverLength = 80;
+        const endX = leverPivot.x + Math.cos(leverCurrentAngle) * leverLength;
+        const endY = leverPivot.y + Math.sin(leverCurrentAngle) * leverLength;
+        
+        ctx.strokeStyle = '#ff0';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(leverPivot.x, leverPivot.y);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+        
+        // ピボット
+        ctx.fillStyle = '#ff0';
+        ctx.beginPath();
+        ctx.arc(leverPivot.x, leverPivot.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     
-    // === バネの線描画 ===
-    function drawSpringLine() {
-      if (!activeSpr || !pullStart || !pullCurrent) return;
+    // メインループ
+    function update() {
+      Matter.Engine.update(engine, 1000 / 60);
       
-      springOverlay.innerHTML = `
-        <line x1="${pullStart.x}" y1="${pullStart.y}" 
-              x2="${pullCurrent.x}" y2="${pullCurrent.y}" 
-              class="spring-line"/>
-      `;
-    }
-    
-    function clearSpringLine() {
-      springOverlay.innerHTML = '';
-    }
-    
-    // === 穴に落ちた処理 ===
-    function handleCoinInHole() {
-      updateStatus('穴に落ちた！ リセット中...');
-      setTimeout(() => {
-        resetCoin();
-        updateStatus('Ready! ドラッグしてコインを発射');
-      }, 1000);
-    }
-    
-    // === コインリセット ===
-    function resetCoin() {
-      if (!coin) return;
+      // 穴との衝突判定
+      if (coin) {
+        for (const hole of holes) {
+          const dx = coin.position.x - hole.center.x;
+          const dy = coin.position.y - hole.center.y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          
+          if (dist < hole.radius + CONFIG.coinRadius * 0.5) {
+            setTimeout(() => {
+              Matter.Body.setPosition(coin, spawnPoint);
+              Matter.Body.setVelocity(coin, { x: 0, y: 0 });
+              Matter.Body.setAngularVelocity(coin, 0);
+            }, 100);
+            break;
+          }
+        }
+        
+        // ステータス更新
+        const speed = Math.sqrt(coin.velocity.x**2 + coin.velocity.y**2);
+        statusEl.textContent = `速度: ${speed.toFixed(1)}\n位置: ${coin.position.x.toFixed(0)}, ${coin.position.y.toFixed(0)}`;
+      }
       
-      Matter.Body.setPosition(coin, settingsData.spawn);
-      Matter.Body.setVelocity(coin, { x: 0, y: 0 });
-      Matter.Body.setAngularVelocity(coin, 0);
+      draw();
+      requestAnimationFrame(update);
     }
     
-    // === ステータス更新 ===
-    function updateGameStatus() {
-      if (!coin) return;
+    // イベント
+    canvas.addEventListener('mousedown', e => {
+      const rect = canvas.getBoundingClientRect();
+      startLever(e.clientX - rect.left, e.clientY - rect.top);
+    });
+    
+    canvas.addEventListener('mousemove', e => {
+      const rect = canvas.getBoundingClientRect();
+      moveLever(e.clientX - rect.left, e.clientY - rect.top);
+    });
+    
+    canvas.addEventListener('mouseup', () => releaseLever());
+    
+    canvas.addEventListener('touchstart', e => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const touch = e.touches[0];
+      startLever(touch.clientX - rect.left, touch.clientY - rect.top);
+    }, { passive: false });
+    
+    canvas.addEventListener('touchmove', e => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const touch = e.touches[0];
+      moveLever(touch.clientX - rect.left, touch.clientY - rect.top);
+    }, { passive: false });
+    
+    canvas.addEventListener('touchend', e => {
+      e.preventDefault();
+      releaseLever();
+    }, { passive: false });
+    
+    resetBtn.addEventListener('click', () => {
+      if (coin) {
+        Matter.Body.setPosition(coin, spawnPoint);
+        Matter.Body.setVelocity(coin, { x: 0, y: 0 });
+        Matter.Body.setAngularVelocity(coin, 0);
+      }
+    });
+    
+    // 初期化
+    try {
+      statusEl.textContent = '画像読み込み中...';
       
-      const speed = Math.sqrt(coin.velocity.x ** 2 + coin.velocity.y ** 2);
-      const pos = coin.position;
+      [mapImg, renImg] = await Promise.all([
+        loadImage('map.png'),
+        loadImage('ren.png')
+      ]);
       
-      updateStatus(`
-速度: ${speed.toFixed(1)} px/s
-位置: (${pos.x.toFixed(0)}, ${pos.y.toFixed(0)})
-角速度: ${coin.angularVelocity.toFixed(2)}
-      `.trim());
+      mapW = renImg.width;
+      mapH = renImg.height;
+      
+      canvas.width = mapW;
+      canvas.height = mapH;
+      
+      statusEl.textContent = '物理構造解析中...';
+      renData = analyzeRenPng(renImg);
+      
+      statusEl.textContent = '物理エンジン初期化中...';
+      initPhysics();
+      
+      statusEl.textContent = '準備完了！';
+      
+      update();
+      
+    } catch (error) {
+      console.error('Error:', error);
+      statusEl.textContent = 'エラー: ' + error.message;
     }
-    
-    // === ステータス表示 ===
-    function updateStatus(text) {
-      statusEl.textContent = text;
-    }
-    
-    // === 開始 ===
-    init();
   })();
   </script>
 </body>
