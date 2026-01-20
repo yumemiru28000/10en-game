@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>10円玉 発射レバー 実験</title>
+  <title>10円打ち出しレバー実験</title>
   <style>
     body {
       margin: 0;
@@ -17,9 +17,9 @@
       flex: 1;
     }
     #ui {
-      padding: 8px;
+      padding: 6px 10px;
       background: #111;
-      font-size: 14px;
+      font-size: 13px;
     }
     button {
       margin-right: 8px;
@@ -29,8 +29,8 @@
 <body>
   <div id="world"></div>
   <div id="ui">
-    マウスでレバー（白い棒）をドラッグして「引き」、離すと 10円が発射されます。
-    <button id="reset">リセット</button>
+    <button id="reset">10円をリセット</button>
+    レバーをマウスでつかんで下方向へ引いてください（離すと発射）
   </div>
 
   <!-- Matter.js -->
@@ -41,27 +41,24 @@
       Render,
       Runner,
       Bodies,
+      Body,
       Composite,
       Constraint,
-      Body,
-      Mouse,
-      MouseConstraint,
-      Vector,
-      Events
+      Vector
     } = Matter;
 
     const engine = Engine.create();
     const world  = engine.world;
 
     // 重力（下向き）
-    engine.world.gravity.y = 1;
+    world.gravity.y = 1.0;
 
-    const width  = 800;
-    const height = 400;
+    const width  = 600;
+    const height = 500;
 
     const render = Render.create({
       element: document.getElementById('world'),
-      engine,
+      engine: engine,
       options: {
         width,
         height,
@@ -69,191 +66,280 @@
         background: '#222'
       }
     });
-
     Render.run(render);
     const runner = Runner.create();
     Runner.run(runner, engine);
 
-    // 床と壁
-    const floor = Bodies.rectangle(width/2, height-20, width, 40, {
+    // --- 基本ステージ（箱、床、斜め床など） ---
+    const wallThickness = 40;
+
+    const leftWall = Bodies.rectangle(80, height / 2, wallThickness, height, {
+      isStatic: true,
+      render: { fillStyle: '#444' }
+    });
+    const rightWall = Bodies.rectangle(width - 80, height / 2, wallThickness, height, {
+      isStatic: true,
+      render: { fillStyle: '#444' }
+    });
+    const ceiling = Bodies.rectangle(width / 2, 40, width - 160, 30, {
       isStatic: true,
       render: { fillStyle: '#444' }
     });
 
-    const leftWall = Bodies.rectangle(40, height/2, 40, height, {
+    // 少し傾けた床（10円がレバー側へ転がってくるイメージ）
+    const floor = Bodies.rectangle(width / 2, height - 40, width - 160, 30, {
       isStatic: true,
-      render: { fillStyle: '#333' }
-    });
-    const rightWall = Bodies.rectangle(width-40, height/2, 40, height, {
-      isStatic: true,
-      render: { fillStyle: '#333' }
+      angle: -Math.PI / 40, // わずかに左上がり
+      render: { fillStyle: '#555' }
     });
 
-    Composite.add(world, [floor, leftWall, rightWall]);
+    // 箱の角に置いた斜めの棒（ガイド）
+    const cornerBar = Bodies.rectangle(180, height - 120, 160, 12, {
+      isStatic: true,
+      angle: -Math.PI / 4, // -45度
+      render: { fillStyle: '#888' }
+    });
 
-    // 10円玉パラメータ
-    const COIN_RADIUS = 11;      // 見た目の大きさ
-    const COIN_MASS   = 0.0055;  // 5.5g
+    Composite.add(world, [leftWall, rightWall, ceiling, floor, cornerBar]);
 
-    // 発射位置（レバー先端の前あたり）
-    const LAUNCH_X = 250;
-    const LAUNCH_Y = height - 80;
+    // --- 10円玉 ---
+    const COIN_RADIUS = 11;   // 見た目の半径 (px)
+    const COIN_MASS   = 0.0055; // 5.5g = 0.0055kg
+
+    let coin = null;
 
     function createCoin() {
-      const coin = Bodies.circle(LAUNCH_X, LAUNCH_Y, COIN_RADIUS, {
-        mass: COIN_MASS,
-        restitution: 0.3,
-        friction: 0.05,
-        frictionAir: 0.001,
-        render: {
-          fillStyle: '#cc8844',
-          strokeStyle: '#ddbb77',
-          lineWidth: 2
-        }
-      });
-      return coin;
-    }
-
-    let coin = createCoin();
-    Composite.add(world, coin);
-
-    // レバー（打ち出し棒）
-    // 支点は少し左下、棒は右方向に伸びる
-    const PIVOT_X = 200;
-    const PIVOT_Y = height - 60;
-    const LEVER_LENGTH = 150;
-
-    const lever = Bodies.rectangle(
-      PIVOT_X + LEVER_LENGTH/2,
-      PIVOT_Y,
-      LEVER_LENGTH,
-      18,
-      {
-        mass: 1,
-        friction: 0.02,
-        frictionAir: 0.002,
-        render: {
-          fillStyle: '#f0f0f0'
-        }
-      }
-    );
-
-    // 支点（固定）
-    const pivot = Bodies.circle(PIVOT_X, PIVOT_Y, 5, {
-      isStatic: true,
-      render: { fillStyle: '#ff4444' }
-    });
-
-    // レバーと支点を結ぶジョイント（回転ヒンジ）
-    const hinge = Constraint.create({
-      bodyA: lever,
-      pointA: { x: -LEVER_LENGTH/2, y: 0 },
-      bodyB: pivot,
-      pointB: { x: 0, y: 0 },
-      length: 0,
-      stiffness: 1
-    });
-
-    Composite.add(world, [lever, pivot, hinge]);
-
-    // 「発射台」っぽさを出すためのガイド（見た目だけ）
-    const guide = Bodies.rectangle(LAUNCH_X + 40, LAUNCH_Y + 5, 120, 10, {
-      isStatic: true,
-      angle: 0,
-      render: { fillStyle: '#666' }
-    });
-    Composite.add(world, guide);
-
-    // マウス制御
-    const mouse = Mouse.create(render.canvas);
-    const mouseConstraint = MouseConstraint.create(engine, {
-      mouse,
-      constraint: {
-        stiffness: 0.2,
-        render: { visible: false }
-      }
-    });
-    Composite.add(world, mouseConstraint);
-
-    render.mouse = mouse;
-
-    // レバーの「自然な角度」（0 ラジアンより少し上向きにしておく）
-    const REST_ANGLE = -0.2; // ラジアン（少し上向き）
-
-    // レバーにかかる「バネトルク」の強さ
-    const SPRING_STIFFNESS = 0.8; // 大きいほど強く戻る
-    const SPRING_DAMPING   = 0.2; // 減衰（揺れを止めるため）
-
-    // マウスでレバーをドラッグしているかどうか
-    let isDraggingLever = false;
-
-    // どのボディをつかんだか確認し、レバーならドラッグ中フラグを立てる
-    Events.on(mouseConstraint, 'startdrag', (event) => {
-      if (event.body === lever) {
-        isDraggingLever = true;
-        // ドラッグ中はレバーの角速度を0にしておく（手でゆっくり動かすイメージ）
-        Body.setAngularVelocity(lever, 0);
-      }
-    });
-
-    Events.on(mouseConstraint, 'enddrag', (event) => {
-      if (event.body === lever) {
-        // レバーから手を離した
-        isDraggingLever = false;
-        // ここからはバネの力で自動的に戻る
-      }
-    });
-
-    // 毎フレーム、レバーに「バネトルク」を加える
-    Events.on(engine, 'beforeUpdate', () => {
-      // レバーの現在角度
-      const angle = lever.angle;
-
-      // 目標角度との差（REST_ANGLE が自然な位置）
-      const angleError = angle - REST_ANGLE;
-
-      // 角速度（回転スピード）
-      const angVel = lever.angularVelocity;
-
-      // バネトルク = -k * 角度差
-      // 減衰トルク = -d * 角速度
-      const torque = -SPRING_STIFFNESS * angleError - SPRING_DAMPING * angVel;
-
-      // レバーをドラッグしている間も、バネのエネルギーは「ためて」おくイメージとして
-      // 常にトルクは計算しておく（ただし、ドラッグ中はマウス制約が強く支配する）
-      Body.applyForce(
-        lever,
-        lever.position,
-        // トルクを擬似的に力に変換（レバーの長さで割る）
-        {
-          x: 0,
-          y: torque / LEVER_LENGTH
-        }
-      );
-    });
-
-    // 10円が「レバー先端」に乗るように、定期的に位置を確認し、
-    // レバーが戻るときに自然に弾かれるようにする
-    // ここでは特別な制約は使わず、ただ置いておくだけ
-    function resetCoinAndLever() {
-      // 10円をリセット
       if (coin) {
         Composite.remove(world, coin);
       }
-      coin = createCoin();
+      // 斜め床の上、少し右寄りから転がってくるように配置
+      coin = Bodies.circle(260, height - 160, COIN_RADIUS, {
+        mass: COIN_MASS,
+        restitution: 0.2,
+        friction: 0.03,
+        frictionAir: 0.001,
+        render: {
+          fillStyle: '#cc8844',
+          strokeStyle: '#e0b46a',
+          lineWidth: 2
+        }
+      });
       Composite.add(world, coin);
-
-      // レバーの角度と位置を初期化
-      Body.setPosition(lever, { x: PIVOT_X + LEVER_LENGTH/2, y: PIVOT_Y });
-      Body.setAngle(lever, REST_ANGLE);
-      Body.setAngularVelocity(lever, 0);
-      Body.setVelocity(lever, { x: 0, y: 0 });
     }
 
-    document.getElementById('reset').addEventListener('click', resetCoinAndLever);
+    createCoin();
 
-    // 初期状態
-    resetCoinAndLever();
+    // --- レバーと打ち出し棒 ---
+    // レバーは縦向きで、時計回りに最大約90度回せる
+    // レバーの軸位置
+    const leverPivot = { x: 120, y: 220 };
+
+    const lever = Bodies.rectangle(leverPivot.x, leverPivot.y - 60, 18, 120, {
+      density: 0.002,
+      frictionAir: 0.02,
+      render: { fillStyle: '#99ccff' }
+    });
+
+    // レバーの回転を固定するヒンジ
+    const leverHinge = Constraint.create({
+      bodyA: lever,
+      pointA: { x: 0, y: 60 }, // レバー下端あたり
+      pointB: { x: leverPivot.x, y: leverPivot.y },
+      stiffness: 1,
+      length: 0
+    });
+
+    Composite.add(world, [lever, leverHinge]);
+
+    // 打ち出し棒（プランジャー）
+    // 10円より少し小さいすき間から飛び出すイメージ
+    // 位置は箱の右側の方（レバーとリンクで動く）
+    const plunger = Bodies.rectangle(260, height - 130, 60, 10, {
+      density: 0.004,
+      frictionAir: 0.02,
+      render: { fillStyle: '#ffcc66' }
+    });
+
+    // プランジャーのスライド用ガイド（縦位置をほぼ制限したいので角度を0で、横だけに近い動き）
+    const plungerGuide = Constraint.create({
+      bodyA: plunger,
+      pointA: { x: 0, y: 0 },
+      pointB: { x: 260, y: height - 130 },
+      stiffness: 0.9,
+      length: 0
+    });
+
+    Composite.add(world, [plunger, plungerGuide]);
+
+    // 発射口のすき間を表す、小さな床と天井（棒だけが出る）
+    const lowerGap = Bodies.rectangle(260, height - 115, 80, 6, {
+      isStatic: true,
+      render: { fillStyle: '#777' }
+    });
+    const upperGap = Bodies.rectangle(260, height - 145, 80, 6, {
+      isStatic: true,
+      render: { fillStyle: '#777' }
+    });
+    Composite.add(world, [lowerGap, upperGap]);
+
+    // --- レバーとプランジャーを「リンク」する ---
+    // レバー角度 → バネの伸び量(=エネルギー) → プランジャーの「戻り速度」に反映
+
+    let isDraggingLever = false;
+    let dragStartAngle = 0;
+    let dragStartMouseAngle = 0;
+
+    const MAX_LEVER_ROT = Math.PI / 2; // 約90度
+    const MIN_LEVER_ROT = 0;           // 縦向き
+
+    // 現在のバネエネルギー（0～1 程度に正規化）
+    let springEnergy = 0;
+
+    // レバーの角度から「バネの伸び」を計算してエネルギーを決める
+    function updateSpringFromLever() {
+      const currentAngle = lever.angle;
+      const stretch = Math.max(0, Math.min(currentAngle, MAX_LEVER_ROT)); // 0～MAX
+      // エネルギー ~ 伸び量^2 としてみる（バネエネルギー 1/2 k x^2 のイメージ）
+      const energy = (stretch / MAX_LEVER_ROT) ** 2;
+      springEnergy = energy;
+    }
+
+    // レバー角度からプランジャーの引き量を決める（単純な線形マッピング）
+    function updatePlungerFromLever() {
+      const t = Math.max(0, Math.min(lever.angle / MAX_LEVER_ROT, 1));
+      // プランジャー基準位置から最大 80px くらい後ろへ引く
+      const maxBack = 80;
+      const baseX = 260 + maxBack * t;
+
+      Body.setPosition(plunger, {
+        x: baseX,
+        y: height - 130
+      });
+      // 角度は常に水平方向
+      Body.setAngle(plunger, 0);
+      Body.setAngularVelocity(plunger, 0);
+      Body.setVelocity(plunger, { x: 0, y: 0 });
+    }
+
+    // レバーを自然に戻す＋バネエネルギーでプランジャーを押し出す処理
+    function applySpringReturn() {
+      if (isDraggingLever) return; // ドラッグ中はバネ制御しない
+
+      const angle = lever.angle;
+
+      if (angle <= 0.001 && Math.abs(lever.angularVelocity) < 0.01) {
+        // ほぼ基準位置
+        Body.setAngle(lever, 0);
+        Body.setAngularVelocity(lever, 0);
+        return;
+      }
+
+      // バネトルク: angle が大きいほど強く戻す
+      const k = 0.15 + springEnergy * 0.8; // 引き具合でバネの強さが変わるイメージ
+      const damping = 0.12;
+
+      const torque = -k * angle - damping * lever.angularVelocity;
+      // トルクをそのまま角加速度に近似的に適用
+      lever.torque = torque;
+
+      // プランジャーにもそれに応じた速度を与える
+      const t = Math.max(0, Math.min(angle / MAX_LEVER_ROT, 1));
+      const maxBack = 80;
+      const currentBack = maxBack * t;
+      const desiredX = 260 + currentBack;
+
+      // angle が大きいほど押し出し速度も大きく
+      const pushPower = springEnergy * 40; // 「引き具合によって戻るスピードが変わる」部分
+      const vx = -pushPower * t;          // レバーが戻る方向に合わせて左向き
+
+      Body.setVelocity(plunger, { x: vx, y: 0 });
+
+      // 実際の位置はエンジンに任せるが、変にぶれないように少しガイド
+      Body.applyForce(plunger, plunger.position, {
+        x: vx * 0.0005,
+        y: 0
+      });
+    }
+
+    // --- マウス操作でレバーをドラッグ ---
+    const canvas = render.canvas;
+
+    function getMousePos(evt) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (evt.clientX - rect.left) * (canvas.width / rect.width),
+        y: (evt.clientY - rect.top)  * (canvas.height / rect.height)
+      };
+    }
+
+    canvas.addEventListener('mousedown', (evt) => {
+      const pos = getMousePos(evt);
+      const dx = pos.x - lever.position.x;
+      const dy = pos.y - lever.position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      // レバーをつかんだかどうか（簡易的に距離で判定）
+      if (dist < 80) {
+        isDraggingLever = true;
+        dragStartAngle = lever.angle;
+        const vec = { x: pos.x - leverPivot.x, y: pos.y - leverPivot.y };
+        dragStartMouseAngle = Math.atan2(vec.y, vec.x);
+      }
+    });
+
+    canvas.addEventListener('mousemove', (evt) => {
+      if (!isDraggingLever) return;
+      const pos = getMousePos(evt);
+      const vec = { x: pos.x - leverPivot.x, y: pos.y - leverPivot.y };
+      const nowMouseAngle = Math.atan2(vec.y, vec.x);
+
+      // ピボット基準の角度差を計算
+      let delta = nowMouseAngle - dragStartMouseAngle;
+
+      // 初期レバーはだいたい縦(=約90度)だが、ここでは「下方向へ90度まで」しか動けないように制限
+      let targetAngle = dragStartAngle + delta;
+
+      // 0(縦)～MAX_LEVER_ROT(90度) の範囲にクランプ
+      targetAngle = Math.max(MIN_LEVER_ROT, Math.min(MAX_LEVER_ROT, targetAngle));
+
+      Body.setAngle(lever, targetAngle);
+      Body.setAngularVelocity(lever, 0);
+
+      updateSpringFromLever();
+      updatePlungerFromLever();
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      if (isDraggingLever) {
+        isDraggingLever = false;
+        // ここからは applySpringReturn() に任せる
+      }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      if (isDraggingLever) {
+        isDraggingLever = false;
+      }
+    });
+
+    // --- 毎フレームの更新 ---
+    Matter.Events.on(engine, 'beforeUpdate', () => {
+      applySpringReturn();
+    });
+
+    // --- UI: 10円をリセット ---
+    document.getElementById('reset').addEventListener('click', () => {
+      createCoin();
+      // レバーとプランジャーも初期状態に戻す
+      Body.setAngle(lever, 0);
+      Body.setAngularVelocity(lever, 0);
+      springEnergy = 0;
+      updatePlungerFromLever();
+    });
+
+    // 初期位置合わせ
+    Body.setAngle(lever, 0);
+    updateSpringFromLever();
+    updatePlungerFromLever();
   </script>
 </body>
 </html>
