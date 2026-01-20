@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>10円ゲーム レバー発射実験（重さ・角度パラメータ調整版）</title>
+  <title>10円ゲーム レバー発射実験（調整版）</title>
   <style>
     body {
       margin: 0;
@@ -16,7 +16,7 @@
     }
 
     #uiPanel {
-      width: 180px;
+      width: 160px;
       background: #111;
       border-right: 1px solid #333;
       padding: 8px;
@@ -29,8 +29,8 @@
 
     #leverArea {
       position: relative;
-      width: 160px;
-      height: 160px;
+      width: 140px;
+      height: 140px;
       margin: 0 auto;
       border: 1px solid #444;
       background: #181818;
@@ -42,10 +42,10 @@
     #lever {
       position: absolute;
       width: 12px;       /* 縦棒の太さ */
-      height: 90px;      /* 縦棒の長さ */
+      height: 80px;      /* 縦棒の長さ */
       background: #ccc;
       left: 50%;
-      bottom: 20px;
+      bottom: 15px;
       transform-origin: 50% 100%; /* 下端を支点 */
       transform: translateX(-50%) rotate(0deg);
       cursor: grab;
@@ -54,11 +54,11 @@
       cursor: grabbing;
     }
 
-    /* 「L」の横棒部分を疑似要素で表現 */
+    /* 「L」の横棒部分 */
     #lever::after {
       content: "";
       position: absolute;
-      width: 32px;   /* 横棒の長さ */
+      width: 30px;   /* 横棒の長さ */
       height: 12px;  /* 横棒の太さ */
       background: #ccc;
       left: 50%;
@@ -96,17 +96,12 @@
       background: #444;
     }
     input[type="number"] {
-      width: 70px;
+      width: 60px;
       background: #222;
       border: 1px solid #555;
       color: #eee;
       padding: 2px 4px;
       border-radius: 3px;
-    }
-    label {
-      font-size: 11px;
-      display: block;
-      margin-top: 4px;
     }
   </style>
 </head>
@@ -117,35 +112,21 @@
       <div id="leverLabel">レバー</div>
     </div>
     <div id="leverInfo">
-      レバー角度: <span id="angleText">0</span>°<br>
+      角度: <span id="angleText">0</span>°<br>
       引き具合(0～1): <span id="powerText">0.00</span>
     </div>
-
-    <label>
+    <div>
       重力:
       <input id="gravity" type="number" step="0.1" value="1.0">
-    </label>
-
-    <label>
-      発射角度(° 右=0, 上=-90):
-      <input id="launchAngleInput" type="number" step="1" value="-45">
-    </label>
-
-    <label>
-      引きにくさ(大きいほど後半が重い):
-      <input id="nonlinearityInput" type="number" step="0.5" value="3">
-    </label>
-
-    <div style="margin-top:4px;">
+    </div>
+    <div>
       <button id="addCoin">10円を置く</button>
       <button id="resetWorld">リセット</button>
     </div>
-
-    <div style="font-size:11px; color:#aaa; margin-top:6px;">
-      操作説明:<br>
-      ・レバーをドラッグで時計回り最大90°まで回す<br>
-      ・離した瞬間、近くの10円を指定角度へ発射<br>
-      ・「引きにくさ」を上げると、後半はほとんど動かなくなる
+    <div style="font-size:11px; color:#aaa; margin-top:4px;">
+      操作:<br>
+      ・レバーをドラッグで時計回り最大90°<br>
+      ・離すと、近くの10円を指定方向へ発射
     </div>
   </div>
 
@@ -154,25 +135,46 @@
   <!-- Matter.js -->
   <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
   <script>
-    // ================== 調整用パラメータ =====================
-    // 最大レバー角度（度）
-    const MAX_LEVER_ANGLE_DEG = 90;
+    // ============================================================
+    // レバー／発射／斜面の「設定用定数」ブロック
+    // ============================================================
 
-    // 「引きにくさ」の初期値（UI からも変更可）
-    // 大きくするほど、後半はほとんど角度が増えなくなる
-    let PULL_NONLINEARITY = 3.0;
+    // レバーがどれくらい「重く」感じるか（非線形度）
+    // 大きいほど、最後のほうが急に重くなる（＝パワーが急に増える）
+    const REBA_HEAVINESS_EXPONENT = 3.0;   // 2.0, 3.0, 4.0 などを試してみてください
 
-    // マウス移動 → 生角度変化への感度（線形部分）
-    const PULL_SENSITIVITY = 0.5; // 大きくすると少しの移動でたくさん回る
+    // レバーの最大角度（度）
+    const REBA_MAX_ANGLE_DEG = 90;
 
-    // 発射角度（度、右向き0°、上向き -90°） UI から変更可
-    let LAUNCH_ANGLE_DEG = -45;
+    // 打ち出し方向（角度・度）: 0度=右、90度=下、-90度=上
+    // たとえば  -45 で右上方向へ
+    const REBA_LAUNCH_ANGLE_DEG = -45;
 
-    // 最大発射速度（角度が MAX のときの速度の大きさ）
-    const MAX_LAUNCH_SPEED = 25;
+    // 打ち出す力（速度の最大値）をどれくらいにするか
+    // 大きいほど強く飛ぶ
+    const REBA_MAX_LAUNCH_SPEED = 30;     // 25〜50くらいで調整してみてください
 
-    // =========================================================
+    // レバーのドラッグ感度（マウス移動量→角度変化）
+    const REBA_DRAG_SENSITIVITY = 0.5;    // 大きいと少しの移動で大きく回る
+
+    // 発射判定する範囲（レバーの「打ち出す棒」が届く範囲イメージ）
+    const REBA_LAUNCH_RADIUS = 30;
+
+    // 10円玉の物理パラメータ
+    const COIN_RADIUS = 11;
+    const COIN_MASS   = 0.0055; // 5.5g
+
+    // 10円が「少しの斜面でも転がるか」実験用の床角度（ラジアン）
+    // 0 に近いほどほぼ水平。0.05 rad ≒ 2.9°
+    const REBA_TEST_SLOPE_ANGLE = 0.05;
+
+    // 発射台の座標（ここを変えれば発射位置を変えられる）
+    const REBA_LAUNCH_BASE_X = 220;
+    const REBA_LAUNCH_BASE_Y = 400;  // 画面の高さに合わせて後で微調整可
+
+    // ============================================================
     // Matter.js 基本セットアップ
+    // ============================================================
     const Engine = Matter.Engine;
     const Render = Matter.Render;
     const Runner = Matter.Runner;
@@ -184,7 +186,7 @@
     const world  = engine.world;
     engine.world.gravity.y = 1.0;
 
-    const canvasWidth  = window.innerWidth - 180; // UIパネル分
+    const canvasWidth  = window.innerWidth - 160; // UIパネル分を差し引き
     const canvasHeight = window.innerHeight;
 
     const render = Render.create({
@@ -201,7 +203,9 @@
     const runner = Runner.create();
     Runner.run(runner, engine);
 
-    // ================== フィールド構造 =======================
+    // ============================================================
+    // 壁などのフィールド構造
+    // ============================================================
     const thickness = 40;
 
     const leftWall = Bodies.rectangle(20, canvasHeight / 2, thickness, canvasHeight, {
@@ -217,8 +221,8 @@
       render: { fillStyle: '#444' }
     });
 
-    // 右下の斜め床 + 角の棒
-    const floorAngle = -Math.PI / 8;
+    // 右下の「大きめ斜面」と角の棒
+    const floorAngle = -Math.PI / 8;  // 右上が高い斜面
     const floorLength = 500;
 
     const slopedFloor = Bodies.rectangle(
@@ -244,17 +248,32 @@
       }
     );
 
-    Composite.add(world, [leftWall, rightWall, ceiling, slopedFloor, cornerPost]);
+    // 中央に、ごくわずかに傾いたテスト用の床
+    const gentleSlope = Bodies.rectangle(
+      canvasWidth / 2,
+      canvasHeight / 2 + 80,
+      350,
+      10,
+      {
+        isStatic: true,
+        angle: REBA_TEST_SLOPE_ANGLE,
+        render: { fillStyle: '#555' }
+      }
+    );
 
-    // ================== 10円玉 ==============================
-    const COIN_RADIUS = 11;
-    const COIN_MASS   = 0.0055;
+    Composite.add(world, [leftWall, rightWall, ceiling, slopedFloor, cornerPost, gentleSlope]);
+
+    // ============================================================
+    // 10円玉
+    // ============================================================
+    const coins = [];
 
     function createCoin(x, y) {
       return Bodies.circle(x, y, COIN_RADIUS, {
         mass: COIN_MASS,
         restitution: 0.3,
         friction: 0.1,
+        frictionStatic: 0.2,  // これを下げると、より小さな斜面でも転がりやすい
         frictionAir: 0.002,
         render: {
           fillStyle: '#cc8844',
@@ -264,8 +283,6 @@
       });
     }
 
-    const coins = [];
-
     function addCoinAt(x, y) {
       const c = createCoin(x, y);
       coins.push(c);
@@ -273,32 +290,32 @@
       return c;
     }
 
-    // 発射台の位置
-    const launchBaseX = 240;
-    const launchBaseY = canvasHeight - 220;
-    addCoinAt(launchBaseX, launchBaseY);
+    // 初期の10円：発射台付近に1枚
+    addCoinAt(REBA_LAUNCH_BASE_X, REBA_LAUNCH_BASE_Y);
 
-    // 「10円より小さいすき間」風のブロック
+    // ============================================================
+    // 発射台の見た目（スリットなど）
+    // ============================================================
     const blockThickness = 20;
     const baseBlockWidth = 80;
 
     const slotUpper = Bodies.rectangle(
-      launchBaseX,
-      launchBaseY - COIN_RADIUS - 5,
+      REBA_LAUNCH_BASE_X,
+      REBA_LAUNCH_BASE_Y - COIN_RADIUS - 5,
       baseBlockWidth,
       blockThickness,
       { isStatic: true, render: { fillStyle: '#555' } }
     );
     const slotLower = Bodies.rectangle(
-      launchBaseX,
-      launchBaseY + COIN_RADIUS + 5,
+      REBA_LAUNCH_BASE_X,
+      REBA_LAUNCH_BASE_Y + COIN_RADIUS + 5,
       baseBlockWidth,
       blockThickness,
       { isStatic: true, render: { fillStyle: '#555' } }
     );
     const slotLeftWall = Bodies.rectangle(
-      launchBaseX - baseBlockWidth / 2 + 10,
-      launchBaseY,
+      REBA_LAUNCH_BASE_X - baseBlockWidth / 2 + 10,
+      REBA_LAUNCH_BASE_Y,
       20,
       COIN_RADIUS * 4,
       { isStatic: true, render: { fillStyle: '#555' } }
@@ -306,77 +323,57 @@
 
     Composite.add(world, [slotUpper, slotLower, slotLeftWall]);
 
-    // ================== レバー UI ロジック ===================
+    // ============================================================
+    // レバー UI ロジック
+    // ============================================================
     const leverEl = document.getElementById('lever');
     const angleTextEl = document.getElementById('angleText');
     const powerTextEl = document.getElementById('powerText');
     const gravityInput = document.getElementById('gravity');
-    const launchAngleInput = document.getElementById('launchAngleInput');
-    const nonlinearityInput = document.getElementById('nonlinearityInput');
     const addCoinBtn = document.getElementById('addCoin');
     const resetWorldBtn = document.getElementById('resetWorld');
 
-    // 表示上のレバー角度 [度]（0〜MAX_LEVER_ANGLE_DEG）
     let leverAngleDeg = 0;
+    const maxAngleDeg = REBA_MAX_ANGLE_DEG;
 
-    // ドラッグ中フラグ
     let isDraggingLever = false;
     let dragStartY = 0;
-    let dragStartProgress = 0;  // 「内部の進み具合（0〜1）」の開始値
+    let dragStartAngle = 0;
 
-    // 内部の「進み具合（0〜1）」 → 表示角度への変換
-    // 重く感じさせるための非線形マッピング
-    function progressToAngle(progress) {
-      // 0〜1 の progress を、非線形に変換
-      // p' = 1 - (1 - p)^(n)  (n が大きいほど後半が伸びにくい)
-      const n = PULL_NONLINEARITY;
-      const mapped = 1 - Math.pow(1 - progress, n);
-      return mapped * MAX_LEVER_ANGLE_DEG;
+    function calcPullPower() {
+      const normalized = leverAngleDeg / maxAngleDeg; // 0〜1
+      // 引き具合を指数で強くする（重い感覚）
+      // 例: exponent=3 なら、0.5^3=0.125 なので、前半はかなり軽い/弱い、後半で一気に強く
+      return Math.pow(normalized, REBA_HEAVINESS_EXPONENT);
     }
 
-    // 表示角度 → 内部進み具合（0〜1）への逆変換
-    function angleToProgress(angleDeg) {
-      const a = Math.max(0, Math.min(MAX_LEVER_ANGLE_DEG, angleDeg));
-      const ratio = a / MAX_LEVER_ANGLE_DEG;
-      // ratio = 1 - (1 - p)^n → (1 - p)^n = 1 - ratio
-      // → 1 - p = (1 - ratio)^(1/n) → p = 1 - (1 - ratio)^(1/n)
-      const n = PULL_NONLINEARITY;
-      const p = 1 - Math.pow(1 - ratio, 1 / n);
-      return p;
-    }
-
-    // 現在の角度を UI 更新
     function updateLeverVisual() {
-      leverEl.style.transform = `translateX(-50%) rotate(${leverAngleDeg.toFixed(2)}deg)`;
+      leverEl.style.transform = `translateX(-50%) rotate(${leverAngleDeg}deg)`;
       angleTextEl.textContent = leverAngleDeg.toFixed(1);
 
-      // 引き具合（内部 progress 自体を表示）
-      const progress = angleToProgress(leverAngleDeg);
-      powerTextEl.textContent = progress.toFixed(2);
+      const pullPower = calcPullPower();
+      powerTextEl.textContent = pullPower.toFixed(2);
     }
 
-    // レバー位置 → 発射パワー（速度の大きさ）に変換
-    // 「打ち出す速度自体は角度に比例」のままにしてある
-    function getLaunchPower() {
-      const angleRatio = leverAngleDeg / MAX_LEVER_ANGLE_DEG; // 0〜1
-      const speed = angleRatio * MAX_LAUNCH_SPEED;
-      return speed;
-    }
-
-    // 発射方向を LAUNCH_ANGLE_DEG から計算
+    // 打ち出し方向（ベクトル）を定数から計算
     function getLaunchDirection() {
-      const rad = LAUNCH_ANGLE_DEG * Math.PI / 180;
+      const rad = REBA_LAUNCH_ANGLE_DEG * Math.PI / 180;
       return {
         x: Math.cos(rad),
         y: Math.sin(rad)
       };
     }
 
-    // レバーを離したときに発射
+    // 発射パワー（速度）を計算
+    function getLaunchPower() {
+      const pullPower = calcPullPower();
+      return pullPower * REBA_MAX_LAUNCH_SPEED;
+    }
+
     function releaseLeverAndLaunch() {
       const power = getLaunchPower();
       if (power <= 0.1) {
-        // ほとんど引いていないときは何もしない
+        // ほとんど引いてないときは発射しない
         leverAngleDeg = 0;
         updateLeverVisual();
         return;
@@ -384,46 +381,34 @@
 
       const dir = getLaunchDirection();
 
-      // 発射位置の近くにいるコインを探す
-      const launchRadius = 30;
       coins.forEach(c => {
-        const dx = c.position.x - launchBaseX;
-        const dy = c.position.y - launchBaseY;
+        const dx = c.position.x - REBA_LAUNCH_BASE_X;
+        const dy = c.position.y - REBA_LAUNCH_BASE_Y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < launchRadius) {
+        if (dist < REBA_LAUNCH_RADIUS) {
           const vx = dir.x * power;
           const vy = dir.y * power;
           Body.setVelocity(c, { x: vx, y: vy });
         }
       });
 
-      // レバーを一気に戻す
+      // レバーは戻る（ここでは一瞬で0度に）
       leverAngleDeg = 0;
       updateLeverVisual();
     }
 
-    // レバーのドラッグ開始
     function startDragLever(startClientY) {
       isDraggingLever = true;
       dragStartY = startClientY;
-      dragStartProgress = angleToProgress(leverAngleDeg); // 現在角度を progress に変換
+      dragStartAngle = leverAngleDeg;
     }
 
-    // レバーのドラッグ移動
     function moveDragLever(currentClientY) {
       if (!isDraggingLever) return;
       const dy = currentClientY - dragStartY;
-
-      // まず「線形な仮の角度増加」を考える
-      const deltaAngleLinear = dy * PULL_SENSITIVITY; // 下へ動かすと正（時計回り）
-      const newAngleLinear = dragStartProgress * MAX_LEVER_ANGLE_DEG + deltaAngleLinear;
-
-      // 線形角度を 0〜MAX にクランプしてから、それを角度→progress→非線形で角度に戻す
-      const clampedLinearAngle = Math.max(0, Math.min(MAX_LEVER_ANGLE_DEG, newAngleLinear));
-      let baseProgress = clampedLinearAngle / MAX_LEVER_ANGLE_DEG; // 線形の進み具合(0〜1)
-      // ここで「後半が重い」ように再マッピング
-      // → 最終的な表示角度は progressToAngle(baseProgress)
-      leverAngleDeg = progressToAngle(baseProgress);
+      let newAngle = dragStartAngle + dy * REBA_DRAG_SENSITIVITY;
+      newAngle = Math.max(0, Math.min(maxAngleDeg, newAngle));
+      leverAngleDeg = newAngle;
       updateLeverVisual();
     }
 
@@ -433,38 +418,34 @@
       releaseLeverAndLaunch();
     }
 
-    // マウスイベント
+    // マウス
     leverEl.addEventListener('mousedown', (e) => {
       e.preventDefault();
       startDragLever(e.clientY);
     });
-
     window.addEventListener('mousemove', (e) => {
       if (!isDraggingLever) return;
       e.preventDefault();
       moveDragLever(e.clientY);
     });
-
     window.addEventListener('mouseup', (e) => {
       if (!isDraggingLever) return;
       e.preventDefault();
       endDragLever();
     });
 
-    // タッチイベント
+    // タッチ
     leverEl.addEventListener('touchstart', (e) => {
       e.preventDefault();
       const t = e.touches[0];
       startDragLever(t.clientY);
     }, { passive: false });
-
     window.addEventListener('touchmove', (e) => {
       if (!isDraggingLever) return;
       e.preventDefault();
       const t = e.touches[0];
       moveDragLever(t.clientY);
     }, { passive: false });
-
     window.addEventListener('touchend', (e) => {
       if (!isDraggingLever) return;
       e.preventDefault();
@@ -473,40 +454,33 @@
 
     updateLeverVisual();
 
-    // ================== UI コントロール =======================
+    // ============================================================
+    // UI ボタン
+    // ============================================================
     gravityInput.addEventListener('input', (e) => {
       const g = parseFloat(e.target.value) || 0;
       engine.world.gravity.y = g;
     });
 
-    launchAngleInput.addEventListener('input', (e) => {
-      const a = parseFloat(e.target.value);
-      if (!isNaN(a)) {
-        LAUNCH_ANGLE_DEG = a;
-      }
-    });
-
-    nonlinearityInput.addEventListener('input', (e) => {
-      const n = parseFloat(e.target.value);
-      if (!isNaN(n) && n > 0) {
-        PULL_NONLINEARITY = n;
-        // パラメータが変わったので、現在の角度から再描画
-        updateLeverVisual();
-      }
-    });
-
     addCoinBtn.addEventListener('click', () => {
-      const x = launchBaseX + (Math.random() * 20 - 10);
-      const y = launchBaseY + (Math.random() * 10 - 5);
+      const x = REBA_LAUNCH_BASE_X + (Math.random() * 20 - 10);
+      const y = REBA_LAUNCH_BASE_Y + (Math.random() * 10 - 5);
       addCoinAt(x, y);
     });
 
     resetWorldBtn.addEventListener('click', () => {
       coins.forEach(c => Composite.remove(world, c));
       coins.length = 0;
-      addCoinAt(launchBaseX, launchBaseY);
+      addCoinAt(REBA_LAUNCH_BASE_X, REBA_LAUNCH_BASE_Y);
       leverAngleDeg = 0;
       updateLeverVisual();
+    });
+
+    // ウィンドウリサイズ時の注意（必要なら本格対応を）
+    window.addEventListener('resize', () => {
+      // 本格対応するなら再レイアウトが必要。
+      // 今は何もしない（必要なら location.reload() を有効化）。
+      // location.reload();
     });
   </script>
 </body>
